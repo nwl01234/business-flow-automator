@@ -70,7 +70,24 @@ Swagger: `/docs`. Healthcheck: `/health`.
 
 Формат листа: `SKU | Name | Stock | Price`.
 
+### Подключение Google Sheets за 5 шагов
+
+1. [console.cloud.google.com](https://console.cloud.google.com) → создать проект (бесплатно).
+2. APIs & Services → Library → включить **Google Sheets API**.
+3. APIs & Services → Credentials → Create credentials → **Service account** → создать JSON-ключ, файл положить в корень проекта как `google-credentials.json` (уже в `.gitignore`).
+4. Создать Google-таблицу с листом `Stock`, формат: `SKU | Name | Stock | Price`, и расшарить её на e-mail сервисного аккаунта (адрес в конце JSON, поле `client_email`) с правами Editor.
+5. В `.env`: `GOOGLE_CREDENTIALS_FILE=google-credentials.json`, `GOOGLE_SHEET_ID=<id из ссылки таблицы>`. Рестарт — синхронизация подхватится автоматически, статус видно на вкладке «Аналитика → Интеграции».
+
 Без ключей система работает на локальной таблице. Адаптер инвентаря решает ровно одну проблему — Sheets недоступен или не заведён, бизнес-операции не должны падать.
+
+## Excel-зеркало данных
+
+Между API и внешним миром есть третий слой выгрузок — живой Excel (`data/mirror.xlsx`):
+
+- три листа: **Orders** (1000 последних), **Stock**, **Operations** (500 последних записей журнала);
+- после каждой операции с заявкой зеркалирование выполняется фоновым таском — Excel никогда не блокирует бизнес-поток;
+- скачивается кнопкой **xlsx ↓** в тулбаре дашборда (`GET /api/export/excel`, Bearer-авторизация);
+- работает без каких-либо внешних ключей — демо-сценарий «сравнить данные» доступен сразу.
 
 ## Расписание
 
@@ -84,8 +101,10 @@ APScheduler внутри backend: ежедневный отчёт в `DAILY_REPO
 | GET | `/api/orders` | список с фильтрами; менеджер видит только свои |
 | POST | `/api/orders` | создание заявки; проверка остатка, 409 при нехватке |
 | PATCH | `/api/orders/{id}/status` | смена статуса + списание/возврат + журнал + уведомления |
-| GET | `/api/analytics/metrics` | KPI, серии по дням, топ товаров |
+| GET | `/api/analytics/metrics` | KPI, серии по дням, топ товаров, каналы, скорость обработки |
 | GET | `/api/analytics/operations` | журнал операций |
+| GET | `/api/analytics/export/excel` | живое Excel-зеркало (Orders/Stock/Operations) |
+| GET | `/api/analytics/integrations` | статус Sheets и Excel-зеркала |
 | GET/POST | `/api/inventory` · POST `/api/inventory/sync` | остатки / синхронизация со Sheets |
 | WS | `/api/ws` | события заказов для дашборда |
 
@@ -102,18 +121,19 @@ Deploy: Railway/Render — сервис из `backend/`, второй из `bot/
 ## Продуманные компромиссы
 
 - **SQLite по умолчанию** — внутреннему инструменту на 1–5 менеджеров этого достаточно; `DATABASE_URL` меняется на Postgres без правок кода. Alembic миграций нет, `create_all` — честно указано; для прод-развития — первый пункт.
-- **Аудит — append-only таблица**, не event sourcing. Для уровня задачи — правильно: историчность важнее переусложнения.
+- **Аудит — append-only таблица**, не event sourcing. Для уровня задачи — правильно: историчность важнее переусложнения. Неудачные входы пишутся в тот же журнал (`login_failed` + IP).
 - **Пароли — PBKDF2-SHA256 (100k итераций)** без внешних зависимостей (passlib-хелл не оправдан). Перейти на argon2 — при желании.
-- **Внешние сервисы не ломают поток заявки**: Gmail/Sheets/SMTP/Telegram падение → warning в лог, операция выглядит успешно. Это принципиальное решение — смотри `services/notify.py` и `services/sheets.py`.
+- **Токен в localStorage, не в httpOnly cookie** — осознанный trade-off: нет CSRF-поверхности, но токен читаем JS при XSS. Прод-эволюция — refresh-token rotation, см. Roadmap. JWT живёт 8 часов; брутфорс входа режется rate-лимитом 5 неудач/мин на IP (429).
+- **Внешние сервисы не ломают поток заявки**: Gmail/Sheets/SMTP/Telegram/Excel падение → warning в лог, операция выглядит успешно. Это принципиальное решение — смотри `services/notify.py`, `services/sheets.py`, `services/excel.py`.
 - **Бот ходит в REST API backend'а**, а не импортирует Python-код — можно уносить бот в отдельный контейнер/сервер без изменений.
-- **Fallback-дашборд на Alpine.js** для баре-metal деплоев без Node.
+- **Fallback-дашборд на Alpine.js** для bare-metal деплоев без Node.
 
 ## Структура
 
 ```
 backend/app/        main · config · database · models · schemas · security · ws
 backend/app/routers/   auth · orders · inventory · analytics
-backend/app/services/  sheets · notify · audit · scheduler · seed
+backend/app/services/  sheets · excel · notify · audit · scheduler · seed
 frontend/           React (Vite + Tailwind 4 + Chart.js), fallback: alpine/
 bot/                aiogram 3, FSM-диалог заказа через REST
 docker-compose.yml  backend + bot (+ Postgres по профилю full)
@@ -122,4 +142,12 @@ start.bat / stop.bat / start-bot.bat   локальный запуск на Wind
 
 ## Roadmap
 
-Alembic · argon2id · Telegram webhook вместо polling · SSE/дробленный WS-канал по вкладкам · экспорт журнала в CSV · 2FA.
+Alembic · argon2id · httpOnly refresh-token rotation · Telegram webhook вместо polling · SSE/дробленный WS-канал по вкладкам · 2FA.
+
+## Скриншоты
+
+| | |
+|---|---|
+| ![Архитектура](.assets/screens/01.png) | ![Дашборд](.assets/screens/02.png) |
+| ![Заказы](.assets/screens/03.png) | ![Склад](.assets/screens/04.png) |
+| ![Аудит](.assets/screens/05.png) | |
