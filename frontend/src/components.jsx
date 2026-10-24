@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { fmt, fmtDate } from './api.js';
+import { doLogin, fmt, fmtDate } from './api.js';
 import { SalesChart, TopProducts } from './charts.jsx';
 
 const STATUS_STYLE = {
