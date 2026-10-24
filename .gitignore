@@ -23,3 +23,5 @@ frontend/node_modules/
 .vscode/
 .DS_Store
 Thumbs.db
+_deploy.ps1
+_ws_*
