@@ -9,8 +9,9 @@ from fastapi.staticfiles import StaticFiles
 from .config import settings
 from .database import Base, SessionLocal, engine
 from .routers import analytics, auth, inventory, orders
-from .services import scheduler, seed
+from .services import seed
 from .services import sheets as sheets_svc
+from .services.scheduler import scheduler as aps_scheduler
 from .ws import ws_endpoint
 
 logging.basicConfig(level=logging.INFO,
@@ -31,9 +32,9 @@ async def lifespan(app: FastAPI):
         seed.seed(db)
     finally:
         db.close()
-    scheduler.start()
+    aps_scheduler.start()
     yield
-    scheduler.shutdown()
+    aps_scheduler.shutdown()
 
 
 app = FastAPI(title=settings.app_name, version="1.0.0", lifespan=lifespan,

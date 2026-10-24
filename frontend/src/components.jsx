@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { fmt, fmtDate } from './api.js';
 import { SalesChart, TopProducts } from './charts.jsx';
 
@@ -61,7 +61,7 @@ export function Login({ onLogin }) {
 }
 
 export function Shell(p) {
-  const { user, metrics, filters, setFilters, onRefresh, onNewOrder, wsLive, onLogout, tab, setTab } = p;
+  const { user, metrics, history, filters, setFilters, onRefresh, onNewOrder, wsLive, onLogout, tab, setTab } = p;
 
   const m = metrics || {};
   const kpis = [

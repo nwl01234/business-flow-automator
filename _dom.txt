@@ -1,0 +1,15 @@
+﻿<!DOCTYPE html>
+<html lang="ru"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Business Flow тАФ ╨Ф╨░╤И╨▒╨╛╤А╨┤ ╨░╨▓╤В╨╛╨╝╨░╤В╨╕╨╖╨░╤Ж╨╕╨╕</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+  <script type="module" crossorigin="" src="/assets/index-BexOBK7A.js"></script>
+  <link rel="stylesheet" crossorigin="" href="/assets/index-v8QtKA0f.css">
+</head>
+<body>
+  <div id="root"><div class="min-h-screen flex items-center justify-center p-6"><form class="card w-full max-w-sm p-8 shadow-2xl"><div class="flex items-center gap-3 mb-8"><div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-lg">тЧЖ</div><div><div class="text-white font-bold">Business Flow</div><div class="text-xs text-slate-500">Automator ┬╖ v1.0</div></div></div><label class="block text-xs font-semibold text-slate-400 mb-1">╨Ы╨╛╨│╨╕╨╜</label><input placeholder="admin" class="w-full mb-4 bg-slate-900/70 border border-[#1e2947] rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500" value=""><label class="block text-xs font-semibold text-slate-400 mb-1">╨Я╨░╤А╨╛╨╗╤М</label><input type="password" placeholder="тАвтАвтАвтАвтАвтАвтАвтАв" class="w-full mb-6 bg-slate-900/70 border border-[#1e2947] rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500" value=""><button class="w-full py-2.5 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50">╨Т╨╛╨╣╤В╨╕</button><p class="mt-2 text-xs text-slate-600 text-center">╨┤╨╡╨╝╨╛: admin / admin123 ┬╖ manager / manager123</p></form></div></div>
+
+
+</body></html>
