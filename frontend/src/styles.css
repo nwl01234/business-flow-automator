@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+body {
+  background: radial-gradient(1200px 500px at 80% -10%, rgba(99, 102, 241, .12), transparent), #0b1020;
+}
+
+.card {
+  background: linear-gradient(180deg, #111830f2, #0d1428f2);
+  border: 1px solid #1e2947;
+  border-radius: 1rem;
+}
+
+.num { font-variant-numeric: tabular-nums; }
+
+.pulse-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 0 rgba(16, 185, 129, .6);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse { 70% { box-shadow: 0 0 0 8px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #1e2947; border-radius: 8px; }

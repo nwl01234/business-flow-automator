@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Business Flow — Дашборд автоматизации</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = { darkMode: 'class', theme: { extend: {
+  fontFamily: { sans: ['Inter', 'sans-serif'] },
+  colors: { surface: { DEFAULT: '#0b1020', card: '#111830', line: '#1e2947' } },
+}}};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3@3.14.1/dist/cdn.min.js"></script>
+<style>
+[x-cloak]{display:none!important}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#1e2947;border-radius:8px}
+body{background:radial-gradient(1200px 500px at 80% -10%, rgba(99,102,241,.12), transparent), #0b1020}
+.card{background:linear-gradient(180deg,#111830f2,#0d1428f2);border:1px solid #1e2947;border-radius:1rem}
+.num{font-variant-numeric:tabular-nums}
+.pulse-dot{width:8px;height:8px;border-radius:50%;background:#10b981;box-shadow:0 0 0 0 rgba(16,185,129,.6);animation:pulse 2s infinite}
+@keyframes pulse{70%{box-shadow:0 0 0 8px transparent}100%{box-shadow:0 0 0 0 transparent}}
+</style>
+</head>
+<body class="text-slate-300 font-sans min-h-screen" x-data="app()" x-init="init()" x-cloak>
+
+<!-- ═══ LOGIN ═══ -->
+<template x-if="!user">
+<div class="min-h-screen flex items-center justify-center p-6">
+  <div class="card w-full max-w-sm p-8 shadow-2xl">
+    <div class="flex items-center gap-3 mb-8">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-lg">◆</div>
+      <div><div class="text-white font-bold">Business Flow</div><div class="text-xs text-slate-500">Automator · v1.0</div></div>
+    </div>
+    <label class="block text-xs font-semibold text-slate-400 mb-1">Логин</label>
+    <input x-model="loginForm.login" @keydown.enter="doLogin()"
+           class="w-full mb-4 bg-slate-900/70 border border-surface-line rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500" placeholder="admin">
+    <label class="block text-xs font-semibold text-slate-400 mb-1">Пароль</label>
+    <input x-model="loginForm.password" type="password" @keydown.enter="doLogin()"
+           class="w-full mb-6 bg-slate-900/70 border border-surface-line rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500" placeholder="••••••••">
+    <button @click="doLogin()" :disabled="loading"
+            class="w-full py-2.5 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50">
+      <span x-show="!loading">Войти</span><span x-show="loading">Проверка…</span>
+    </button>
+    <p class="mt-4 text-xs text-slate-500 text-center text-rose-400" x-text="loginError" x-show="loginError"></p>
+    <p class="mt-2 text-xs text-slate-600 text-center">демо: admin / admin123 · manager / manager123</p>
+  </div>
+</div>
+</template>
+
+<!-- ═══ APP ═══ -->
+<template x-if="user">
+<div class="flex min-h-screen">
+  <!-- Sidebar (desktop) -->
+  <aside class="hidden lg:flex flex-col w-60 shrink-0 border-r border-surface-line p-5 gap-2">
+    <div class="flex items-center gap-2 mb-6">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-sm">◆</div>
+      <span class="text-white font-bold text-sm">Business Flow</span>
+    </div>
+    <template x-for="t in tabs" :key="t.id">
+      <button @click="tab=t.id; tab==='inventory'&&loadProducts()"
+              class="text-left px-3 py-2 rounded-lg text-sm font-medium transition"
+              :class="tab===t.id ? 'bg-indigo-500/15 text-indigo-300' : 'hover:bg-slate-800/60'">
+        <span x-text="t.icon"></span>&nbsp; <span x-text="t.name"></span>
+      </button>
+    </template>
+    <div class="mt-auto text-xs text-slate-500">
+      <div class="flex items-center gap-2 mb-1"><span class="pulse-dot"></span> live · обновление 15 сек</div>
+      <div class="text-slate-400" x-text="user.full_name"></div>
+      <div class="uppercase tracking-wide text-[10px]" x-text="user.role"></div>
+      <button @click="logout()" class="mt-3 text-slate-500 hover:text-rose-400">Выйти →</button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 p-4 sm:p-8 max-w-7xl mx-auto w-full">
+    <!-- mobile header -->
+    <div class="lg:hidden flex items-center justify-between mb-4">
+      <div class="flex items-center gap-2"><div class="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-xs">◆</div><span class="text-white font-bold text-sm">Business Flow</span></div>
+      <button @click="logout()" class="text-xs text-slate-500">Выйти</button>
+    </div>
+    <div class="lg:hidden flex gap-1 mb-4 overflow-x-auto">
+      <template x-for="t in tabs" :key="'m'+t.id">
+        <button @click="tab=t.id; tab==='inventory'&&loadProducts()"
+                class="px-3 py-1.5 rounded-lg text-xs whitespace-nowrap"
+                :class="tab===t.id?'bg-indigo-500/20 text-indigo-300':'bg-slate-800/60'" x-text="t.icon+' '+t.name"></button>
+      </template>
+    </div>
+
+    <!-- Filters -->
+    <div class="card p-4 mb-6 flex flex-wrap items-end gap-3">
+      <div><label class="block text-[10px] uppercase text-slate-500 mb-1">Дата с</label>
+        <input type="date" x-model="filters.from" @change="refresh()" class="bg-slate-900/70 border border-surface-line rounded-lg px-3 py-2 text-sm text-white"></div>
+      <div><label class="block text-[10px] uppercase text-slate-500 mb-1">по</label>
+        <input type="date" x-model="filters.to" @change="refresh()" class="bg-slate-900/70 border border-surface-line rounded-lg px-3 py-2 text-sm text-white"></div>
+      <div><label class="block text-[10px] uppercase text-slate-500 mb-1">Статус</label>
+        <select x-model="filters.status" @change="refresh()" class="bg-slate-900/70 border border-surface-line rounded-lg px-3 py-2 text-sm text-white">
+          <option value="">Все</option><option value="new">Новые</option><option value="confirmed">Подтверждены</option><option value="shipped">Отгружены</option><option value="cancelled">Отменены</option>
+        </select></div>
+      <template x-if="user.role!=='bot'">
+        <button @click="openNewOrder()" class="ml-auto px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90">＋ Новая заявка</button>
+      </template>
+      <button @click="refresh()" class="px-3 py-2 rounded-lg bg-slate-800/60 text-sm hover:bg-slate-700/60">⟳</button>
+    </div>
+
+    <!-- KPI -->
+    <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
+      <template x-for="k in kpis" :key="k.label">
+        <div class="card p-5">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs text-slate-500" x-text="k.label"></span>
+            <span class="text-lg" x-text="k.icon"></span>
+          </div>
+          <div class="num text-2xl font-bold text-white" x-text="k.value"></div>
+          <div class="num text-xs mt-1" :class="k.sub && k.sub.indexOf('₽')>-1 ? 'text-slate-400':'text-slate-500'" x-text="k.sub"></div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Charts -->
+    <div id="section-dashboard" x-show="tab==='dashboard'" class="grid lg:grid-cols-3 gap-4 mb-6">
+      <div class="card p-5 lg:col-span-2">
+        <h3 class="text-sm font-semibold text-white mb-4">📈 Динамика заявок и выручки</h3>
+        <div class="h-64"><canvas id="salesChart"></canvas></div>
+      </div>
+      <div class="card p-5">
+        <h3 class="text-sm font-semibold text-white mb-4">🏆 Топ товаров</h3>
+        <div class="h-64"><canvas id="topChart"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Orders table -->
+    <div id="section-orders" x-show="tab==='orders' || tab==='dashboard'" class="card p-0 mb-6 overflow-hidden">
+      <div class="flex items-center justify-between p-5 pb-3">
+        <h3 class="text-sm font-semibold text-white">🧾 Заявки <span class="text-slate-500 font-normal" x-show="user.role==='manager'">(только мои)</span></h3>
+        <span class="num text-xs text-slate-500" x-text="orders.length + ' шт'"></span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm min-w-[760px]">
+          <thead>
+            <tr class="text-[10px] uppercase tracking-wider text-slate-500 border-y border-surface-line">
+              <th class="text-left px-5 py-2.5">Номер</th><th class="text-left px-3 py-2.5">Клиент</th>
+              <th class="text-left px-3 py-2.5">Товар</th><th class="text-right px-3 py-2.5">Сумма</th>
+              <th class="text-left px-3 py-2.5">Канал</th><th class="text-left px-3 py-2.5">Дата</th>
+              <th class="text-left px-3 py-2.5">Статус</th><th class="px-3 py-2.5"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="o in orders" :key="o.id">
+              <tr class="border-b border-surface-line/60 hover:bg-slate-800/30 transition">
+                <td class="px-5 py-3 num font-semibold text-white" x-text="o.number"></td>
+                <td class="px-3 py-3">
+                  <div x-text="o.customer_name"></div>
+                  <div class="text-xs text-slate-500" x-text="o.contact"></div>
+                </td>
+                <td class="px-3 py-3 num" x-text="o.product.name + ' × ' + o.qty"></td>
+                <td class="px-3 py-3 num text-right text-white" x-text="fmt(o.amount) + ' ₽'"></td>
+                <td class="px-3 py-3"><span class="px-2 py-0.5 rounded text-xs" :class="o.source==='telegram'?'bg-sky-500/15 text-sky-300':'bg-violet-500/15 text-violet-300'" x-text="o.source==='telegram'?'✈️ Бот':'🌐 Форма'"></span></td>
+                <td class="px-3 py-3 num text-xs text-slate-400" x-text="fmtDate(o.created_at)"></td>
+                <td class="px-3 py-3">
+                  <select :value="o.status" @change="openStatus(o, $event.target.value)" :disabled="user.role==='bot' || (user.role==='manager' && (o.status==='shipped'||o.status==='cancelled'))"
+                          class="px-2 py-1 rounded-md text-xs font-semibold cursor-pointer outline-none"
+                          :class="{'bg-amber-500/15 text-amber-300': o.status==='new','bg-blue-500/15 text-blue-300': o.status==='confirmed','bg-emerald-500/15 text-emerald-300': o.status==='shipped','bg-rose-500/15 text-rose-300': o.status==='cancelled'}">
+                    <option value="new" :selected="o.status==='new'">● Новая</option>
+                    <option value="confirmed" :selected="o.status==='confirmed'">● Подтверждена</option>
+                    <option value="shipped" :selected="o.status==='shipped'">● Отгружена</option>
+                    <option value="cancelled" :selected="o.status==='cancelled'">● Отменена</option>
+                  </select>
+                </td>
+                <td class="px-3 py-3 text-xs text-slate-600 num" x-text="o.created_by_name"></td>
+              </tr>
+            </template>
+            <tr x-show="!orders.length"><td colspan="8" class="px-5 py-10 text-center text-slate-500 text-sm">Заявок нет — создайте первую 🚀</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Inventory + History -->
+    <div class="grid lg:grid-cols-2 gap-4">
+      <div id="section-inventory" x-show="tab==='inventory' || tab==='dashboard'" class="card p-5">
+        <h3 class="text-sm font-semibold text-white mb-4">📦 Остатки <span class="text-slate-500 font-normal text-xs">(≤5 шт — повестка алерта)</span></h3>
+        <template x-for="p in products" :key="p.id">
+          <div class="flex items-center gap-3 py-2 border-b border-surface-line/40 last:border-0">
+            <span class="text-xs text-slate-500 w-20" x-text="p.sku"></span>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm truncate" x-text="p.name"></div>
+              <div class="h-1.5 mt-1 rounded bg-slate-800 overflow-hidden">
+                <div class="h-full rounded" :style="bar(p.stock)" :class="p.stock<=5?'bg-rose-500':p.stock<=15?'bg-amber-400':'bg-emerald-400'"></div>
+              </div>
+            </div>
+            <span class="num text-sm font-semibold w-14 text-right" x-text="p.stock + ' шт'"></span>
+            <span class="num text-xs text-slate-500 w-20 text-right" x-text="fmt(p.price)+' ₽'"></span>
+          </div>
+        </template>
+      </div>
+
+      <div class="card p-5">
+        <h3 class="text-sm font-semibold text-white mb-4">🕐 История операций <span class="text-slate-500 font-normal text-xs">кто · что · когда · почему</span></h3>
+        <div class="space-y-0 max-h-96 overflow-y-auto pr-1">
+          <template x-for="op in history" :key="op.id">
+            <div class="py-2.5 border-b border-surface-line/40 last:border-0">
+              <div class="flex items-center gap-2 text-sm">
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase" :class="opColor(op)" x-text="opTitle(op)"></span>
+                <span class="num text-slate-400" x-text="op.entity_id"></span>
+                <span class="num text-xs text-slate-600 ml-auto" x-text="fmtDate(op.ts)"></span>
+              </div>
+              <div class="text-xs text-slate-500 mt-0.5">
+                <span x-text="op.actor"></span> · <span x-text="op.details"></span>
+                <span class="text-rose-300/80" x-show="op.reason" x-text="' · причина: '+op.reason"></span>
+              </div>
+            </div>
+          </template>
+          <div x-show="!history.length" class="py-8 text-center text-slate-500 text-sm">История пуста</div>
+        </div>
+      </div>
+    </div>
+    <footer class="text-center text-xs text-slate-600 py-6">Business Flow Automator · FastAPI + Alpine.js · авторазделение ролей, Google Sheets, Telegram</footer>
+  </main>
+</div>
+</template>
+
+<!-- ═══ MODAL: статус/причина ═══ -->
+<div x-show="statusModal.open" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+  <div class="card w-full max-w-md p-6 shadow-2xl" @click.outside="statusModal.open=false">
+    <h3 class="text-white font-bold mb-1">Смена статуса</h3>
+    <p class="text-xs text-slate-500 mb-4" x-text="statusModal.order?.number"></p>
+    <div class="mb-4">
+      <label class="block text-xs text-slate-400 mb-1">Новый статус</label>
+      <div class="flex gap-2 flex-wrap">
+        <button @click="statusModal.status='confirmed'" class="px-3 py-1.5 rounded-lg text-xs font-semibold" :class="statusModal.status==='confirmed'?'bg-blue-500 text-white':'bg-slate-800 text-slate-400'">✅ Подтвердить (списать остаток)</button>
+        <button @click="statusModal.status='shipped'" class="px-3 py-1.5 rounded-lg text-xs font-semibold" :class="statusModal.status==='shipped'?'bg-emerald-500 text-white':'bg-slate-800 text-slate-400'">🚚 Отгрузить</button>
+        <button @click="statusModal.status='cancelled'" class="px-3 py-1.5 rounded-lg text-xs font-semibold" :class="statusModal.status==='cancelled'?'bg-rose-500 text-white':'bg-slate-800 text-slate-400'">❌ Отменить</button>
+      </div>
+    </div>
+    <label class="block text-xs text-slate-400 mb-1">Комментарий / причина <span x-show="statusModal.status==='cancelled'" class="text-rose-400">— обязательна при отмене</span></label>
+    <textarea x-model="statusModal.reason" rows="2" class="w-full bg-slate-900/70 border border-surface-line rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-indigo-500"></textarea>
+    <p class="text-xs mt-2 text-slate-500" x-show="statusModal.status==='confirmed'">⚠️ При подтверждении остаток спишется автоматически и запишется в историю.</p>
+    <div class="flex gap-2 mt-4">
+      <button @click="statusModal.open=false" class="flex-1 py-2 rounded-lg bg-slate-800 text-sm">Отмена</button>
+      <button @click="applyStatus()" class="flex-1 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold">Применить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL: новая заявка ═══ -->
+<div x-show="newOrder.open" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+  <div class="card w-full max-w-md p-6 shadow-2xl" @click.outside="newOrder.open=false">
+    <h3 class="text-white font-bold mb-4">＋ Новая заявка</h3>
+    <label class="block text-xs text-slate-400 mb-1">Товар</label>
+    <select x-model.number="newOrder.product_id" class="w-full mb-3 bg-slate-900/70 border border-surface-line rounded-lg px-3 py-2 text-sm text-white">
+      <option value="">— выберите —</option>
+      <template x-for="p in products" :key="'no'+p.id"><option :value="p.id" x-text="p.name+' · '+p.stock+' шт · '+fmt(p.price)+' ₽'"></option></template>
+    </select>
+    <label class="block text-xs text-slate-400 mb-1">Количество</label>
+    <input type="number" min="1" x-model.number="newOrder.qty" class="w-full mb-3 bg-slate-900/70 border border-surface-line rounded-lg px-3 py-2 text-sm text-white">
+    <label class="block text-xs text-slate-400 mb-1">Имя клиента / компания</label>
+    <input x-model="newOrder.customer_name" class="w-full mb-3 bg-slate-900/70 border border-surface-line rounded-lg px-3 py-2 text-sm text-white">
+    <label class="block text-xs text-slate-400 mb-1">Контакт</label>
+    <input x-model="newOrder.contact" class="w-full mb-4 bg-slate-900/70 border border-surface-line rounded-lg px-3 py-2 text-sm text-white">
+    <p class="text-xs text-amber-400 mb-2" x-show="newOrder.error" x-text="newOrder.error"></p>
+    <div class="flex gap-2">
+      <button @click="newOrder.open=false" class="flex-1 py-2 rounded-lg bg-slate-800 text-sm">Отмена</button>
+      <button @click="createOrder()" class="flex-1 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold">Создать</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div x-show="toast.show" x-cloak class="fixed bottom-5 right-5 z-[60] card px-5 py-3 text-sm text-white shadow-2xl transition-all"
+     :class="toast.ok?'border-emerald-500/40':'border-rose-500/40'" x-text="toast.msg"></div>
+
+<script>
+const fmt = n => new Intl.NumberFormat('ru-RU').format(Math.round(n));
+const fmtDate = s => new Date(s).toLocaleString('ru-RU', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+const dstr = off => { const d=new Date(Date.now()-off*864e5); return d.toISOString().slice(0,10); };
+const STATUS_RU = {new:'Создана', confirmed:'Подтверждена', shipped:'Отгружена', cancelled:'Отменена'};
+
+function app(){ return {
+  user:null, tab:'dashboard', loading:false,
+  loginForm:{login:'', password:''}, loginError:'',
+  filters:{from:dstr(13), to:dstr(0), status:''},
+  metrics:null, orders:[], products:[], history:[],
+  statusModal:{open:false, order:null, status:'confirmed', reason:''},
+  newOrder:{open:false, product_id:'', qty:1, customer_name:'', contact:'', error:''},
+  toast:{show:false, msg:'', ok:true},
+  charts:{},
+  tabs:[ {id:'dashboard', name:'Дашборд', icon:'📊'}, {id:'orders', name:'Заявки', icon:'🧾'}, {id:'inventory', name:'Остатки', icon:'📦'} ],
+
+  get kpis(){ const m=this.metrics||{}; return [
+    {label:'Заявок сегодня', icon:'🆕', value:m.orders_today??'—', sub:'всего за период: '+(m.orders_total??'—')},
+    {label:'Заявок за 7 дней', icon:'📅', value:m.orders_week??'—', sub:'по статусам: '+(m.orders_total??'—')},
+    {label:'Выручка, 7 дней', icon:'💰', value:(m.revenue_week??0)?fmt(m.revenue_week)+' ₽':'—', sub:'всего: '+(m.revenue_total?fmt(m.revenue_total)+' ₽':'0 ₽')},
+    {label:'Конверсия', icon:'🎯', value:m.conversion!=null?m.conversion+' %':'—', sub:'средний чек: '+(m.avg_check?fmt(m.avg_check)+' ₽':'—')},
+    {label:'Низкие остатки', icon:'⚠️', value:m.low_stock?.length??'—', sub:'позиций ≤ 5 шт'},
+  ];},
+
+  async init(){
+    const t = localStorage.getItem('bf_token');
+    if (t) { this.token = t; await this.bootstrap(true); }
+    setInterval(() => { if(this.user) this.refresh(); }, 15000);
+  },
+  api(path, opts={}){
+    const token = localStorage.getItem('bf_token');
+    return fetch('/api'+path, {...opts,
+      headers:{'Content-Type':'application/json', ...(token&&{Authorization:'Bearer '+token}), ...(opts.headers||{})}})
+      .then(async r => { if(r.status===401){this.logout(); throw new Error('unauthorized')} 
+        if(!r.ok) throw await r.json().catch(()=>({message:r.statusText})); return r.json(); });
+  },
+  async bootstrap(keep){
+    try{
+      this.user = await this.api('/auth/me');
+      localStorage.setItem('bf_user', JSON.stringify(this.user));
+      await this.refresh();
+      this.loadProducts();
+    }catch(e){ this.logout(); }
+  },
+  logout(){ localStorage.removeItem('bf_token'); localStorage.removeItem('bf_user'); this.user=null; },
+  async doLogin(){
+    this.loading=true; this.loginError='';
+    try{
+      const r = await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.loginForm)});
+      if(!r.ok) throw new Error('Неверный логин или пароль');
+      const data = await r.json();
+      localStorage.setItem('bf_token', data.access_token);
+      this.user = data.user;
+      await this.refresh(); this.loadProducts();
+    }catch(e){ this.loginError = e.message; }
+    this.loading=false;
+  },
+  qs(){ const f=this.filters; const p=new URLSearchParams();
+    if(f.from) p.set('date_from',f.from); if(f.to) p.set('date_to',f.to); if(f.status) p.set('status',f.status);
+    return p.toString(); },
+  async refresh(){
+    try{
+      const [m, os, ops] = await Promise.all([
+        this.api('/analytics/metrics?'+this.qs()),
+        this.api('/orders?'+this.qs()),
+        this.api('/analytics/operations?limit=40'),
+      ]);
+      this.metrics=m; this.orders=os; this.history=ops;
+      this.$nextTick(()=>this.drawCharts());
+    }catch(e){ this.showToast('Ошибка загрузки: '+(e.message||e), false); }
+  },
+  async loadProducts(){ try{ this.products = await this.api('/inventory'); }catch(e){} },
+  drawCharts(){
+    if(!this.metrics) return;
+    if(typeof Chart==='undefined') return;
+    const s = this.metrics.series, tp = this.metrics.top_products;
+    // Sales
+    const sc = document.getElementById('salesChart');
+    if(sc){ this.charts.sales?.destroy();
+      this.charts.sales = new Chart(sc, {type:'line', data:{
+        labels:s.map(x=>x.date),
+        datasets:[
+          {label:'Заявки', data:s.map(x=>x.count), borderColor:'#818cf8', backgroundColor:'rgba(129,140,248,.15)', fill:true, tension:.35, yAxisID:'y', pointRadius:2},
+          {label:'Выручка ₽', data:s.map(x=>x.revenue), borderColor:'#34d399', tension:.35, yAxisID:'y1', pointRadius:2},
+        ]},
+        options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{labels:{color:'#94a3b8', boxWidth:12}}},
+          scales:{x:{ticks:{color:'#64748b'}, grid:{color:'#1e2947'}},
+                  y:{ticks:{color:'#64748b'}, grid:{color:'#1e2947'}},
+                  y1:{position:'right', ticks:{color:'#64748b'}, grid:{display:false}}}}});
+    }
+    // Top products
+    const tc = document.getElementById('topChart');
+    if(tc){ this.charts.top?.destroy();
+      this.charts.top = new Chart(tc, {type:'bar', data:{
+        labels:tp.map(x=>x.name.length>16?x.name.slice(0,15)+'…':x.name),
+        datasets:[{data:tp.map(x=>x.qty), backgroundColor:['#818cf8','#a78bfa','#f472b6','#fbbf24','#34d399'], borderRadius:6}]},
+        options:{indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+          scales:{x:{ticks:{color:'#64748b'}, grid:{color:'#1e2947'}}, y:{ticks:{color:'#94a3b8'}, grid:{display:false}}}}});
+    }
+  },
+  bar(stock){ const max=Math.max(20,...this.products.map(p=>p.stock)); return `width:${Math.min(100,stock/max*100)}%`; },
+  opTitle(op){ return ({order_created:'Новая заявка', status_confirmed:'Подтверждена', status_shipped:'Отгружена', status_cancelled:'Отменена', low_stock_alert:'Алерт остатков', daily_report:'Дневной отчёт', seed_demo:'Инициализация'})[op.action] || op.action; },
+  opColor(op){ return ({order_created:'bg-sky-500/15 text-sky-300', status_confirmed:'bg-blue-500/15 text-blue-300', status_shipped:'bg-emerald-500/15 text-emerald-300', status_cancelled:'bg-rose-500/15 text-rose-300', low_stock_alert:'bg-amber-500/15 text-amber-300'})[op.action] || 'bg-slate-500/15 text-slate-300'; },
+  showToast(msg, ok=true){ this.toast={show:true, msg, ok}; setTimeout(()=>this.toast.show=false, 3000); },
+
+  openStatus(o, status){ this.statusModal={open:true, order:o, status, reason:''}; },
+  async applyStatus(){
+    const {order, status, reason} = this.statusModal;
+    try{
+      await this.api(`/orders/${order.id}/status`, {method:'PATCH', body:JSON.stringify({status, reason})});
+      this.statusModal.open=false;
+      this.showToast(`Заявка ${order.number} → ${STATUS_RU[status]}`);
+      this.refresh(); this.loadProducts();
+    }catch(e){ this.showToast(e.message||'Ошибка', false); }
+  },
+  openNewOrder(){
+    if(!this.products.length) this.loadProducts();
+    this.newOrder={open:true, product_id:'', qty:1, customer_name:'', contact:'', error:''};
+  },
+  async createOrder(){
+    const n=this.newOrder;
+    try{
+      const o = await this.api('/orders',{method:'POST', body:JSON.stringify({product_id:+n.product_id, qty:n.qty, customer_name:n.customer_name, contact:n.contact})});
+      n.open=false; this.showToast(`Заявка ${o.number} создана ✅`); this.refresh(); this.loadProducts();
+    }catch(e){
+      n.error = (e.detail && (typeof e.detail === 'string' ? e.detail : e.detail.message))
+        || (typeof e === 'string' ? e : e.message) || 'Ошибка создания';
+    }
+  },
+}};
+</script>
+</body>
+</html>

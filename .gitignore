@@ -1,0 +1,25 @@
+# ── секреты и окружение ──────────────────────────────
+.env
+.env.*
+!.env.example
+google-credentials.json
+*_ws_result.txt
+
+# ── python ───────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite3
+backend/data/
+
+# ── node ─────────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+
+# ── IDE / ОС ─────────────────────────────────────────
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
