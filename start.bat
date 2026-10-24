@@ -54,7 +54,10 @@ exit /b 1
 :up
 start "" http://localhost:8000
 echo.
-echo OK: dashboard is open. Server runs in the minimized "bfa-server" window.
-echo To stop: stop.bat
+echo OK: dashboard is open.
+echo IMPORTANT:
+echo   - Close THIS window freely - server is not tied to it.
+echo   - Do NOT close the minimized "bfa-server" window: the server lives there.
+echo   - To stop the server later: stop.bat
 pause
 exit /b 0
