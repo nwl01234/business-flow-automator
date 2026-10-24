@@ -21,7 +21,7 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMa
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ["BOT_TOKEN"]
-API_URL = os.getenv("API_PUBLIC_URL", "http://backend:8000")
+API_URL = os.getenv("API_PUBLIC_URL", "http://localhost:8000")
 API_LOGIN = os.getenv("BOT_API_LOGIN", "telegram_bot")
 API_PASSWORD = os.getenv("BOT_API_PASSWORD", "bot_secret_change_me")
 

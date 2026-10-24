@@ -12,6 +12,8 @@ services:
   bot:
     build: ./bot
     env_file: .env
+    environment:
+      - API_PUBLIC_URL=http://backend:8000   # внутри compose-сети бот знает имя backend
     depends_on:
       - backend
     restart: unless-stopped
