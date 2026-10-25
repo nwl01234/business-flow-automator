@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     # Auth
     jwt_secret: str = "change-me-in-production"
-    jwt_ttl_min: int = 720
+    jwt_ttl_min: int = 480  # 8-часовая рабочая сессия
 
     # Seed users
     admin_login: str = "admin"

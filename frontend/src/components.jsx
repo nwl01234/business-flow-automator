@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { doLogin, fmt, fmtDate } from './api.js';
-import { SalesChart, TopProducts } from './charts.jsx';
+import React, { useEffect, useMemo, useState } from 'react';
+import { api, doLogin, downloadExcel, fmt, fmtDate } from './api.js';
+import { DonutChart, SalesChart, TopProducts } from './charts.jsx';
 
 const STATUS_META = {
   new:       { label: 'Новая',        bg: 'rgba(255,149,0,.13)',   color: '#b25e00',  dot: '#ff9500' },
@@ -9,11 +9,19 @@ const STATUS_META = {
   cancelled: { label: 'Отменена',     bg: 'rgba(255,59,48,.11)',   color: '#c02924',  dot: '#ff3b30' },
 };
 const STATUS_ORDER = ['new', 'confirmed', 'shipped', 'cancelled'];
+// Зеркало бэкендовой матрицы ALLOWED_TRANSITIONS — модалка не показывает недоступные шаги
+const TRANSITIONS = {
+  new: ['confirmed', 'cancelled'],
+  confirmed: ['shipped', 'cancelled'],
+  shipped: [],
+  cancelled: [],
+};
 
 const TABS = [
-  { id: 'dashboard', name: 'Дашборд', icon: '▦' },
-  { id: 'orders', name: 'Заявки', icon: '≡' },
-  { id: 'inventory', name: 'Остатки', icon: '◈' },
+  { id: 'dashboard',  name: 'Дашборд',   icon: '▦' },
+  { id: 'analytics',  name: 'Аналитика', icon: '◔' },
+  { id: 'orders',     name: 'Заявки',    icon: '≡' },
+  { id: 'inventory',  name: 'Остатки',   icon: '◈' },
 ];
 
 function Chip({ bg, color, dot, label }) {
@@ -25,6 +33,8 @@ function Chip({ bg, color, dot, label }) {
     </span>
   );
 }
+
+const StatusChip = ({ status }) => <Chip {...STATUS_META[status]} label={STATUS_META[status].label} />;
 
 function Logo({ size = 'w-9 h-9', text = 'text-[15px]' }) {
   return (
@@ -52,7 +62,7 @@ export function Login({ onLogin }) {
         <div className="flex flex-col items-center mb-8">
           <Logo size="w-14 h-14" text="text-[22px]" />
           <h1 className="text-[24px] font-semibold text-[#1d1d1f] mt-4 tracking-tight">Business Flow</h1>
-          <p className="text-[13px] text-[#86868b] mt-1">Automator · v1.0</p>
+          <p className="text-[13px] text-[#86868b] mt-1">Automator · v1.1</p>
         </div>
         <input value={login} onChange={e => setLogin(e.target.value)} placeholder="Логин" autoComplete="username"
                className="field w-full mb-3" />
@@ -72,20 +82,21 @@ export function Login({ onLogin }) {
 }
 
 export function Shell(p) {
-  const { user, metrics, history, filters, setFilters, onRefresh, onNewOrder, wsLive, onLogout, tab, setTab } = p;
+  const { user, metrics, history, filters, setFilters, onNewOrder, onStatus,
+          onRefresh, wsLive, onLogout, tab, setTab } = p;
 
   const m = metrics || {};
   const kpis = [
-    { label: 'Заявок сегодня', icon: '＋', tint: 'rgba(0,113,227,.10)', co: '#0071e3',
+    { label: 'Заявок сегодня', icon: '＋', tint: 'rgba(0,113,227,.10)', co: '#0071e3', go: 'orders',
       value: m.orders_today ?? '—', sub: `всего за период: ${m.orders_total ?? '—'}` },
-    { label: 'Заявок за 7 дней', icon: '≋', tint: 'rgba(175,82,222,.10)', co: '#8944ab',
-      value: m.orders_week ?? '—', sub: `статусы: ${Object.values(m.status_counts || {}).join(' / ')}` },
-    { label: 'Выручка, 7 дней', icon: '₽', tint: 'rgba(52,199,89,.12)', co: '#1b7a3d',
+    { label: 'Заявок за 7 дней', icon: '≋', tint: 'rgba(175,82,222,.10)', co: '#8944ab', go: 'analytics',
+      value: m.orders_week ?? '—', sub: `статусы: ${Object.values(m.status_counts || {}).join(' / ') || '—'}` },
+    { label: 'Выручка, 7 дней', icon: '₽', tint: 'rgba(52,199,89,.12)', co: '#1b7a3d', go: 'analytics',
       value: m.revenue_week ? fmt(m.revenue_week) + ' ₽' : '—', sub: `всего: ${m.revenue_total ? fmt(m.revenue_total) + ' ₽' : '0 ₽'}` },
-    { label: 'Конверсия', icon: '◎', tint: 'rgba(255,149,0,.12)', co: '#b25e00',
+    { label: 'Конверсия', icon: '◎', tint: 'rgba(255,149,0,.12)', co: '#b25e00', go: 'analytics',
       value: m.conversion != null ? m.conversion + ' %' : '—', sub: `средний чек: ${m.avg_check ? fmt(m.avg_check) + ' ₽' : '—'}` },
-    { label: 'Низкие остатки', icon: '⚠', tint: 'rgba(255,59,48,.10)', co: '#c02924',
-      value: m.low_stock ? m.low_stock.length : '—', sub: 'позиций ≤ 5 шт' },
+    { label: 'Низкие остатки', icon: '⚠', tint: 'rgba(255,59,48,.10)', co: '#c02924', go: 'inventory',
+      value: m.low_stock ? m.low_stock.length : '—', sub: 'позиций ≤ 5 шт — кликни' },
   ];
 
   return (
@@ -136,32 +147,35 @@ export function Shell(p) {
           ))}
         </div>
 
-        {/* Filters */}
+        {/* Toolbar */}
         <div className="card px-4 py-3.5 mb-6 flex flex-wrap items-end gap-3">
-          <Field label="Дата с" value={filters.from} type="date" onChange={v => setFilters(f => ({ ...f, from: v }))} />
-          <Field label="по" value={filters.to} type="date" onChange={v => setFilters(f => ({ ...f, to: v }))} />
+          <Field label="Дата с" value={filters.from} onChange={v => setFilters(f => ({ ...f, from: v }))} />
+          <Field label="по" value={filters.to} onChange={v => setFilters(f => ({ ...f, to: v }))} />
           <Field label="Статус" value={filters.status} type="select" onChange={v => setFilters(f => ({ ...f, status: v }))} />
           {user.role !== 'bot' && (
-            <button onClick={onNewOrder}
+            <button onClick={() => onNewOrder()}
                     className="btn btn-primary rounded-[980px] ml-auto px-4 py-2 text-[13px]">
               ＋ Новая заявка
             </button>
           )}
-          <button onClick={onRefresh} className="btn btn-ghost px-3" title="Обновить">⟳</button>
+          <button onClick={() => downloadExcel().catch(() => {})}
+                  className="btn btn-ghost px-3" title="Скачать Excel-зеркало данных">xlsx ↓</button>
+          <button className="btn btn-ghost px-3" onClick={onRefresh} title="Обновить">⟳</button>
         </div>
 
-        {/* KPI */}
+        {/* KPI — каждый кликабелен */}
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
           {kpis.map(k => (
-            <div key={k.label} className="card p-4">
+            <button key={k.label} onClick={() => setTab(k.go)}
+                    className="card p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_10px_34px_rgba(0,0,0,.09)]">
               <div className="flex items-start justify-between mb-3">
                 <span className="text-[12px] text-[#6e6e73] leading-snug">{k.label}</span>
-                <span className="w-7 h-7 rounded-[9px] flex items-center justify-center text-[13px] font-semibold"
+                <span className="w-7 h-7 rounded-[9px] flex items-center justify-center text-[13px] font-semibold shrink-0"
                       style={{ background: k.tint, color: k.co }}>{k.icon}</span>
               </div>
               <div className="num text-[26px] font-semibold text-[#1d1d1f] leading-none">{k.value}</div>
               <div className="num text-[11px] text-[#86868b] mt-1.5">{k.sub}</div>
-            </div>
+            </button>
           ))}
         </div>
 
@@ -172,26 +186,161 @@ export function Shell(p) {
               <SalesChart series={metrics.series} />
             </div>
             <div className="card p-5">
-              <h3 className="text-[15px] font-semibold text-[#1d1d1f] mb-4">Топ товаров</h3>
-              <TopProducts top={metrics.top_products} />
+              <h3 className="text-[15px] font-semibold text-[#1d1d1f] mb-4">Статусы заявок</h3>
+              <DonutChart data={STATUS_ORDER.map(s => ({
+                label: STATUS_META[s].label, value: metrics.status_counts[s] || 0, color: STATUS_META[s].dot,
+              }))} />
             </div>
           </div>
         )}
 
+        {tab === 'analytics' && <AnalyticsTab metrics={metrics} orders={p.orders} />}
+
         {(tab === 'dashboard' || tab === 'orders') && <OrdersTable {...p} />}
-        {(tab === 'inventory' || tab === 'dashboard') && (
+
+        {tab === 'inventory' && (
           <div className="grid lg:grid-cols-2 gap-4">
             <InventoryPanel {...p} />
             <HistoryFeed ops={history} />
           </div>
         )}
-        {tab === 'orders' && <HistoryFeed ops={history} />}
+        {(tab === 'dashboard' || tab === 'orders') && (
+          <div className="grid lg:grid-cols-2 gap-4">
+            <InventoryPanel {...p} />
+            <HistoryFeed ops={history} />
+          </div>
+        )}
 
         <footer className="text-center text-[11px] text-[#86868b] py-8">
-          Business Flow Automator · FastAPI · React · WebSocket · Google Sheets
+          Business Flow Automator · FastAPI · React · WebSocket · Excel-зеркало · Google Sheets
         </footer>
       </main>
     </div>
+  );
+}
+
+function AnalyticsTab({ metrics, orders }) {
+  const [integrations, setIntegrations] = useState(null);
+  useEffect(() => {
+    api('/analytics/integrations').then(setIntegrations).catch(() => setIntegrations({}));
+  }, []);
+
+  const m = metrics || {};
+  const funnel = STATUS_ORDER.map(s => ({ ...STATUS_META[s], id: s, value: (m.status_counts || {})[s] || 0 }));
+  const funnelMax = Math.max(1, ...funnel.map(f => f.value));
+
+  // Менеджеры считаются на клиенте из уже загруженного списка заявок
+  const byManager = useMemo(() => {
+    const acc = {};
+    for (const o of orders) {
+      if (o.status === 'cancelled') continue;
+      const name = o.created_by_name || '—';
+      acc[name] = acc[name] || { name, qty: 0, revenue: 0 };
+      acc[name].qty += o.qty;
+      acc[name].revenue += o.amount;
+    }
+    return Object.values(acc).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
+  }, [orders]);
+  const mgrMax = Math.max(1, ...byManager.map(x => x.revenue));
+
+  return (
+    <>
+      <div className="grid lg:grid-cols-3 gap-4 mb-6">
+        <div className="card p-5">
+          <h3 className="text-[15px] font-semibold text-[#1d1d1f] mb-4">Каналы заявок</h3>
+          <DonutChart data={[
+            { label: 'Telegram-бот', value: (m.by_source || {}).telegram || 0, color: '#5e5ce6' },
+            { label: 'Веб-форма', value: (m.by_source || {}).web || 0, color: '#0071e3' },
+          ]} />
+        </div>
+        <div className="card p-5">
+          <h3 className="text-[15px] font-semibold text-[#1d1d1f] mb-4">Воронка статусов</h3>
+          <div className="pt-2">
+            {funnel.map(f => (
+              <div key={f.id} className="mb-4 last:mb-0">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[12px] font-medium text-[#1d1d1f]">{f.label}</span>
+                  <span className="num text-[12px] font-semibold" style={{ color: f.dot }}>{f.value}</span>
+                </div>
+                <div className="h-2 rounded-full bg-[#e9e9ee] overflow-hidden">
+                  <div className="h-full rounded-full transition-all" style={{ width: (f.value / funnelMax * 100) + '%', background: f.dot }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="card p-5 flex flex-col justify-between">
+          <h3 className="text-[15px] font-semibold text-[#1d1d1f] mb-4">Скорость и деньги</h3>
+          <div>
+            <div className="num text-[32px] font-semibold text-[#1d1d1f] leading-none">
+              {m.avg_ship_hours != null ? m.avg_ship_hours + ' ч' : '—'}
+            </div>
+            <div className="text-[12px] text-[#86868b] mt-1">среднее время до отгрузки</div>
+          </div>
+          <div className="border-t hairline mt-4 pt-4">
+            <div className="num text-[22px] font-semibold text-[#1d1d1f] leading-none">
+              {m.avg_check ? fmt(m.avg_check) + ' ₽' : '—'}
+            </div>
+            <div className="text-[12px] text-[#86868b] mt-1">средний чек</div>
+          </div>
+          <div className="border-t hairline mt-4 pt-4">
+            <div className="num text-[22px] font-semibold text-[#1b7a3d] leading-none">
+              {m.revenue_total ? fmt(m.revenue_total) + ' ₽' : '0 ₽'}
+            </div>
+            <div className="text-[12px] text-[#86868b] mt-1">выручка за период</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-4 mb-6">
+        <div className="card p-5 lg:col-span-2">
+          <h3 className="text-[15px] font-semibold text-[#1d1d1f] mb-4">Динамика по дням</h3>
+          <SalesChart series={m.series || []} />
+        </div>
+        <div className="card p-5">
+          <h3 className="text-[15px] font-semibold text-[#1d1d1f] mb-4">По менеджерам</h3>
+          {byManager.map(mgr => (
+            <div key={mgr.name} className="mb-4 last:mb-0">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[13px] font-medium text-[#1d1d1f] truncate">{mgr.name}</span>
+                <span className="num text-[12px] text-[#6e6e73] ml-2 shrink-0">{fmt(mgr.revenue)} ₽ · {mgr.qty} шт</span>
+              </div>
+              <div className="h-2 rounded-full bg-[#e9e9ee] overflow-hidden">
+                <div className="h-full rounded-full bg-[#0071e3] transition-all" style={{ width: (mgr.revenue / mgrMax * 100) + '%' }} />
+              </div>
+            </div>
+          ))}
+          {!byManager.length && <div className="py-8 text-center text-[13px] text-[#86868b]">Нет данных за период</div>}
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-4 mb-6">
+        <div className="card p-5">
+          <h3 className="text-[15px] font-semibold text-[#1d1d1f] mb-4">Топ товаров</h3>
+          <TopProducts top={m.top_products || []} />
+        </div>
+        <div className="card p-5 lg:col-span-2">
+          <h3 className="text-[15px] font-semibold text-[#1d1d1f] mb-4">Интеграции выгрузки</h3>
+          {[
+            { ok: integrations && integrations.excel_mirror, title: 'Excel-зеркало',
+              desc: 'data/mirror.xlsx — обновляется после каждой операции, качается кнопкой «xlsx ↓»' },
+            { ok: integrations && integrations.sheets_configured, title: 'Google Sheets',
+              desc: 'двусторонняя синхронизация остатков (см. README «Подключение Google Sheets»)' },
+          ].map(row => (
+            <div key={row.title} className="flex items-start gap-3 py-3 border-b hairline last:border-0">
+              <span className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0"
+                    style={{ background: row.ok ? 'rgba(52,199,89,.15)' : 'rgba(255,149,0,.15)', color: row.ok ? '#1b7a3d' : '#b25e00' }}>
+                {row.ok ? '✓' : '!'}
+              </span>
+              <div>
+                <div className="text-[13px] font-medium text-[#1d1d1f]">{row.title}</div>
+                <div className="text-[12px] text-[#86868b]">{row.desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -212,29 +361,67 @@ function Field({ label, value, type, onChange }) {
 }
 
 function OrdersTable({ orders, user, canChange, onStatus }) {
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState({ key: 'created_at', dir: 'desc' });
+
+  const toggleSort = key => setSort(s => s.key === key ? { key, dir: -s.dir } : { key, dir: -1 });
+
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let list = orders;
+    if (q) list = list.filter(o =>
+      [o.number, o.customer_name, o.product.name, o.contact, o.created_by_name]
+        .some(v => String(v).toLowerCase().includes(q)));
+    const dir = sort.dir === 1 ? 1 : -1;
+    return [...list].sort((a, b) => {
+      if (sort.key === 'amount') return (a.amount - b.amount) * dir;
+      if (sort.key === 'qty') return (a.qty - b.qty) * dir;
+      return String(a[sort.key] || '').localeCompare(String(b[sort.key] || '')) * dir;
+    });
+  }, [orders, search, sort]);
+
+  const SortTh = ({ label, k, cls }) => (
+    <th className={'px-3 py-2.5 ' + (cls || '')}>
+      <button onClick={() => toggleSort(k)}
+              className={'uppercase tracking-wider hover:text-[#1d1d1f] transition ' +
+                (sort.key === k ? 'text-[#1d1d1f]' : '')}>
+        {label}
+        <span className="ml-1 text-[9px]">{sort.key === k ? (sort.dir === 1 ? '↑' : '↓') : '⇅'}</span>
+      </button>
+    </th>
+  );
+
   return (
     <div className="card p-0 mb-6 overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4 border-b hairline">
+      <div className="flex flex-wrap items-center gap-3 px-5 py-4 border-b hairline">
         <h3 className="text-[15px] font-semibold text-[#1d1d1f]">
           Заявки {user.role === 'manager' && <span className="text-[#86868b] font-normal text-[13px]">· только мои</span>}
         </h3>
-        <span className="num text-[12px] text-[#86868b]">{orders.length} шт</span>
+        <input className="field ml-auto w-56" placeholder="Поиск: номер / клиент / товар"
+               value={search} onChange={e => setSearch(e.target.value)} />
+        <span className="num text-[12px] text-[#86868b]">{rows.length} из {orders.length}</span>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-[13px] min-w-[760px]">
+        <table className="w-full text-[13px] min-w-[820px]">
           <thead>
             <tr className="text-[10px] font-semibold uppercase tracking-wider text-[#86868b] border-b hairline bg-[#fafafa]">
-              <th className="text-left px-5 py-2.5">Номер</th><th className="text-left px-3 py-2.5">Клиент</th>
-              <th className="text-left px-3 py-2.5">Товар</th><th className="text-right px-3 py-2.5">Сумма</th>
-              <th className="text-left px-3 py-2.5">Канал</th><th className="text-left px-3 py-2.5">Дата</th>
-              <th className="text-left px-3 py-2.5">Статус</th><th className="px-3 py-2.5"></th>
+              <SortTh label="Номер" k="number" cls="text-left px-5" />
+              <SortTh label="Клиент" k="customer_name" cls="text-left" />
+              <th className="text-left px-3 py-2.5 uppercase tracking-wider">Товар</th>
+              <SortTh label="Сумма" k="amount" cls="text-right" />
+              <th className="text-left px-3 py-2.5 uppercase tracking-wider">Канал</th>
+              <SortTh label="Дата" k="created_at" cls="text-left" />
+              <th className="text-left px-3 py-2.5 uppercase tracking-wider">Статус</th>
+              <th className="px-3 py-2.5"></th>
             </tr>
           </thead>
           <tbody>
-            {orders.map(o => {
-              const meta = STATUS_META[o.status];
+            {rows.map(o => {
+              const active = canChange(o);
               return (
-                <tr key={o.id} className="border-b hairline/70 hover:bg-[#fafafa] transition">
+                <tr key={o.id}
+                    onClick={active ? () => onStatus(o, (TRANSITIONS[o.status] || [])[0] || o.status) : undefined}
+                    className={'border-b hairline/70 hover:bg-[#fafafa] transition ' + (active ? 'cursor-pointer' : '')}>
                   <td className="px-5 py-3 num font-semibold text-[#1d1d1f]">{o.number}</td>
                   <td className="px-3 py-3">
                     <div className="font-medium text-[#1d1d1f]">{o.customer_name}</div>
@@ -250,11 +437,12 @@ function OrdersTable({ orders, user, canChange, onStatus }) {
                   </td>
                   <td className="px-3 py-3 num text-[12px] text-[#6e6e73]">{fmtDate(o.created_at)}</td>
                   <td className="px-3 py-3">
-                    <select disabled={!canChange(o)} value={o.status} onChange={e => onStatus(o, e.target.value)}
+                    <select disabled={!active} value={o.status} onClick={e => e.stopPropagation()}
+                            onChange={e => onStatus(o, e.target.value)}
                             className="cursor-pointer appearance-none font-medium text-[12px] rounded-full pl-2.5 pr-6 py-[5px] outline-none transition disabled:opacity-50"
                             style={{
-                              background: `url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath fill='${encodeURIComponent(meta.color)}' d='M0 0l4 5 4-5z'/%3E%3C/svg%3E") no-repeat right 9px center, ${meta.bg}`,
-                              color: meta.color,
+                              background: `url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath fill='${encodeURIComponent(STATUS_META[o.status].color)}' d='M0 0l4 5 4-5z'/%3E%3C/svg%3E") no-repeat right 9px center, ${STATUS_META[o.status].bg}`,
+                              color: STATUS_META[o.status].color,
                             }}>
                       {STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
                     </select>
@@ -263,8 +451,10 @@ function OrdersTable({ orders, user, canChange, onStatus }) {
                 </tr>
               );
             })}
-            {!orders.length && (
-              <tr><td colSpan="8" className="px-5 py-12 text-center text-[#86868b] text-[13px]">Заявок нет — создайте первую</td></tr>
+            {!rows.length && (
+              <tr><td colSpan="8" className="px-5 py-12 text-center text-[#86868b] text-[13px]">
+                {search ? 'Ничего не найдено по запросу' : 'Заявок нет — создайте первую'}
+              </td></tr>
             )}
           </tbody>
         </table>
@@ -273,7 +463,7 @@ function OrdersTable({ orders, user, canChange, onStatus }) {
   );
 }
 
-function InventoryPanel({ products }) {
+function InventoryPanel({ products, onNewOrder, canChange }) {
   const max = Math.max(20, ...products.map(p => p.stock));
   return (
     <div className="card p-5">
@@ -291,8 +481,12 @@ function InventoryPanel({ products }) {
                 <div className="h-full rounded-full transition-all" style={{ width: Math.min(100, (p.stock / max) * 100) + '%', background: col }} />
               </div>
             </div>
-            <span className="num text-[13px] font-semibold text-[#1d1d1f] w-14 text-right">{p.stock} шт</span>
-            <span className="num text-[12px] text-[#86868b] w-20 text-right">{fmt(p.price)} ₽</span>
+            <span className="num text-[13px] font-semibold text-[#1d1d1f] w-16 text-right">{p.stock} шт</span>
+            <span className="num text-[12px] text-[#86868b] w-20 text-right hidden sm:block">{fmt(p.price)} ₽</span>
+            <button onClick={() => onNewOrder(p.id)}
+                    className="btn btn-ghost px-2.5 py-1 text-[11px] shrink-0" title="Создать заявку на этот товар">
+              ＋ заявка
+            </button>
           </div>
         );
       })}
@@ -306,6 +500,7 @@ const OP_META = {
   status_confirmed:  { label: 'Подтверждена', bg: 'rgba(0,113,227,.12)', color: '#0062c4' },
   status_shipped:    { label: 'Отгружена',    bg: 'rgba(52,199,89,.14)', color: '#1b7a3d' },
   status_cancelled:  { label: 'Отменена',     bg: 'rgba(255,59,48,.11)', color: '#c02924' },
+  login_failed:      { label: 'Безопасность', bg: 'rgba(255,149,0,.13)', color: '#b25e00' },
   low_stock_alert:   { label: 'Алерт',        bg: 'rgba(255,149,0,.13)', color: '#b25e00' },
   daily_report:      { label: 'Отчёт',        bg: 'rgba(88,86,214,.10)', color: '#5e5ce6' },
   seed_demo:         { label: 'Система',      bg: 'rgba(28,28,30,.06)',  color: '#6e6e73' },
@@ -342,41 +537,53 @@ function HistoryFeed({ ops }) {
 
 export function StatusModal({ modal, onClose, onChange, onApply }) {
   if (!modal) return null;
-  const buttons = [
-    ['confirmed', 'Подтвердить · списать остаток', '#0071e3'],
-    ['shipped', 'Отгрузить', '#1b7a3d'],
-    ['cancelled', 'Отменить', '#c02924'],
-  ];
+  const allowed = TRANSITIONS[modal.order.status] || [];
+  const labels = { confirmed: 'Подтвердить · списать остаток', shipped: 'Отгрузить', cancelled: 'Отменить' };
+  const colors = { confirmed: '#0071e3', shipped: '#1b7a3d', cancelled: '#c02924' };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/35 backdrop-blur-[3px]">
       <div className="card w-full max-w-md p-6 shadow-2xl">
-        <h3 className="text-[17px] font-semibold text-[#1d1d1f] mb-1">Смена статуса</h3>
-        <p className="text-[12px] text-[#86868b] mb-5 num">{modal.order.number} · {fmt(modal.order.amount)} ₽</p>
-        <label className="block text-[12px] font-medium text-[#6e6e73] mb-2">Новый статус</label>
-        <div className="flex gap-2 flex-wrap mb-4">
-          {buttons.map(([v, label, color]) => (
-            <button key={v} onClick={() => onChange({ status: v })}
-                    className="px-3 py-1.5 rounded-full text-[12px] font-medium transition"
-                    style={modal.status === v
-                      ? { background: color, color: '#fff' }
-                      : { background: 'rgba(28,28,30,.055)', color: '#1d1d1f' }}>
-              {label}
-            </button>
-          ))}
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-[17px] font-semibold text-[#1d1d1f]">Смена статуса</h3>
+          <StatusChip status={modal.order.status} />
         </div>
-        <label className="block text-[12px] font-medium text-[#6e6e73] mb-1.5">
-          Комментарий / причина
-          {modal.status === 'cancelled' && <span className="text-[#c02924]"> — обязательна при отмене</span>}
-        </label>
-        <textarea rows="2" value={modal.reason} onChange={e => onChange({ reason: e.target.value })}
-                  className="field w-full resize-none" />
-        {modal.status === 'confirmed' && (
-          <p className="text-[11px] text-[#86868b] mt-2">При подтверждении остаток спишется автоматически и осядёт в журнале операций.</p>
+        <p className="text-[12px] text-[#86868b] mb-5 num">
+          {modal.order.number} · {modal.order.product.name} × {modal.order.qty} · {fmt(modal.order.amount)} ₽
+        </p>
+        {allowed.length ? (
+          <>
+            <label className="block text-[12px] font-medium text-[#6e6e73] mb-2">Новый статус</label>
+            <div className="flex gap-2 flex-wrap mb-4">
+              {allowed.map(v => (
+                <button key={v} onClick={() => onChange({ status: v })}
+                        className="px-3 py-1.5 rounded-full text-[12px] font-medium transition"
+                        style={modal.status === v
+                          ? { background: colors[v], color: '#fff' }
+                          : { background: 'rgba(28,28,30,.055)', color: '#1d1d1f' }}>
+                  {labels[v]}
+                </button>
+              ))}
+            </div>
+            <label className="block text-[12px] font-medium text-[#6e6e73] mb-1.5">
+              Комментарий / причина
+              {modal.status === 'cancelled' && <span className="text-[#c02924]"> — обязательна при отмене</span>}
+            </label>
+            <textarea rows="2" value={modal.reason} onChange={e => onChange({ reason: e.target.value })}
+                      className="field w-full resize-none" />
+            {modal.status === 'confirmed' && (
+              <p className="text-[11px] text-[#86868b] mt-2">При подтверждении остаток спишется автоматически и осядёт в журнале операций.</p>
+            )}
+            <div className="flex gap-2 mt-5">
+              <button onClick={onClose} className="btn btn-ghost flex-1 rounded-[11px] py-2.5">Отмена</button>
+              <button onClick={onApply} disabled={!modal.status}
+                      className="btn btn-primary flex-1 rounded-[11px] py-2.5">Применить</button>
+            </div>
+          </>
+        ) : (
+          <p className="text-[13px] text-[#86868b] mb-4">
+            Заявка в финальном статусе — переходы недоступны. Все изменения уже в журнале операций.
+          </p>
         )}
-        <div className="flex gap-2 mt-5">
-          <button onClick={onClose} className="btn btn-ghost flex-1 rounded-[11px] py-2.5">Отмена</button>
-          <button onClick={onApply} className="btn btn-primary flex-1 rounded-[11px] py-2.5">Применить</button>
-        </div>
       </div>
     </div>
   );

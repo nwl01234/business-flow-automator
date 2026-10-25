@@ -40,8 +40,21 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title=settings.app_name, version="1.0.0", lifespan=lifespan,
               description="Автоматизация заявок, остатков, уведомлений и истории операций")
 
-app.add_middleware(CORSMiddleware, allow_origins=["*"],
+app.add_middleware(CORSMiddleware,
+                   allow_origins=["http://localhost:8000", "http://127.0.0.1:8000",
+                                  "http://localhost:5173", "http://127.0.0.1:5173",
+                                  "http://localhost:5174", "http://127.0.0.1:5174"],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    """Базовые security-заголовки для статики и API."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 
 @app.get("/health", include_in_schema=False)

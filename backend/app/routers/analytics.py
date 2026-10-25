@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import FileResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,7 @@ from .. import models
 from ..database import get_db
 from ..models import utcnow
 from ..security import get_current_user
+from ..services import excel, sheets
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -70,6 +72,12 @@ def metrics(date_from: str = "", date_to: str = "",
         d["revenue"] += o.amount
     top_products = sorted(products_count.values(), key=lambda x: -x["qty"])[:5]
 
+    # Среднее время подтверждение → отгрузка (по отгруженным за период)
+    shipped = [o for o in orders if o.status == "shipped"]
+    avg_ship_hours = round(
+        sum((o.updated_at - o.created_at).total_seconds() for o in shipped) / len(shipped) / 3600, 1
+    ) if shipped else None
+
     return {
         "orders_today": len(today_orders),
         "orders_week": len(week_orders),
@@ -78,9 +86,14 @@ def metrics(date_from: str = "", date_to: str = "",
         "revenue_total": revenue_total,
         "conversion": conversion,
         "avg_check": avg_check,
+        "avg_ship_hours": avg_ship_hours,
         "low_stock": low_stock,
         "series": list(series.values()),
         "top_products": top_products,
+        "by_source": {
+            s: len([o for o in orders if o.source == s])
+            for s in ("telegram", "web")
+        },
         "status_counts": {
             s: len([o for o in orders if o.status == s])
             for s in ("new", "confirmed", "shipped", "cancelled")
@@ -100,3 +113,19 @@ def operations(limit: int = 60, entity: str = "",
          "entity": op.entity, "entity_id": op.entity_id, "details": op.details, "reason": op.reason}
         for op in q.limit(min(limit, 200)).all()
     ]
+
+
+@router.get("/export/excel")
+def export_excel(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Живое Excel-зеркало данных: Orders / Stock / Operations."""
+    path = excel.sync_mirror(db)
+    return FileResponse(path, media_type=excel.XLSX_MEDIA, filename="business_flow.xlsx")
+
+
+@router.get("/integrations")
+def integrations(user: models.User = Depends(get_current_user)):
+    """Статус внешних выгрузок: Google Sheets и Excel-зеркало."""
+    return {
+        "sheets_configured": sheets.sheets_configured(),
+        "excel_mirror": excel.mirror_path().exists(),
+    }

@@ -60,6 +60,33 @@ export function SalesChart({ series }) {
   return <div className="h-64"><canvas ref={ref} /></div>;
 }
 
+export function DonutChart({ data }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!ref.current) return undefined;
+    const chart = new Chart(ref.current, {
+      type: 'doughnut',
+      data: {
+        labels: data.map(d => d.label),
+        datasets: [{
+          data: data.map(d => d.value),
+          backgroundColor: data.map(d => d.color),
+          borderWidth: 0, hoverOffset: 6, spacing: 2,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: '68%',
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#1d1d1f', usePointStyle: true, pointStyle: 'circle', boxWidth: 7, boxHeight: 7, padding: 10 } },
+          tooltip: baseOpts({}).tooltip,
+        },
+      },
+    });
+    return () => chart.destroy();
+  }, [JSON.stringify(data)]);
+  return <div className="h-64"><canvas ref={ref} /></div>;
+}
+
 export function TopProducts({ top }) {
   const ref = useRef(null);
   useEffect(() => {

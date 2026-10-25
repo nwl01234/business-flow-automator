@@ -108,7 +108,7 @@ export default function App() {
         filters={filters} setFilters={setFilters} onRefresh={() => loadAll()}
         canChange={canChange}
         onStatus={(o, status) => setStatusModal({ order: o, status, reason: '' })}
-        onNewOrder={() => setNewOrder({ product_id: '', qty: 1, customer_name: '', contact: '', error: '' })}
+        onNewOrder={preset => setNewOrder({ product_id: preset ? String(preset) : '', qty: 1, customer_name: '', contact: '', error: '' })}
       />
       <StatusModal
         modal={statusModal}

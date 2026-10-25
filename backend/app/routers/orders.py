@@ -8,7 +8,7 @@ from .. import models, schemas
 from ..database import get_db
 from ..models import utcnow
 from ..security import get_current_user, require
-from ..services import audit, sheets
+from ..services import audit, excel, sheets
 from ..ws import hub
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -93,6 +93,7 @@ def create_order(body: schemas.OrderIn, background: BackgroundTasks,
     )
     background.add_task(hub.broadcast, {"type": "orders_updated",
                                         "number": order.number, "status": order.status})
+    background.add_task(excel.sync_in_background)
     return JSONResponse(status_code=201, content=_order_out(order))
 
 
@@ -127,4 +128,5 @@ def change_status(order_id: int, body: schemas.OrderStatusIn, background: Backgr
     )
     background.add_task(hub.broadcast, {"type": "orders_updated",
                                         "number": order.number, "status": body.status})
+    background.add_task(excel.sync_in_background)
     return _order_out(order)
