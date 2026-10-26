@@ -1,10 +1,31 @@
 # Business Flow Automator
 
-Внутренняя система автоматизации приёма заявок с контролем остатков, уведомлениями, полной историей изменений и живым дашбордом.
+**Автоматизация заявок и остатков для малого бизнеса: Telegram-приём заказов, журнал действий, real-time дашборд, роли.**
 
-Задача, из которой вырос проект: заявки приходят в Telegram и почту, остатки живут в Google Sheets, «кто отменил и почему» никто не знает, отчёты собираются руками. Это обычная ситуация в среднем бизнесе, и она решается связкой: единая точка приёма заявок + автоматическое списание остатков + неизменяемый журнал действий + дашборд, на который менеджеры смотрят каждый день.
+[▶ Демо за 2 минуты](#демо-за-2-минуты) · [Скриншоты](#скриншоты) · [Запуск через Docker](#запуск-через-docker)
 
-**Стек:** Python 3.12 · FastAPI · SQLAlchemy 2 · PostgreSQL/SQLite · React (Vite + Tailwind 4 + Chart.js) + WebSocket · aiogram 3 · Google Sheets API · APScheduler · Docker
+![Дашборд](skrin/1.png)
+
+## Демо за 2 минуты
+
+```bash
+git clone https://github.com/nwl01234/business-flow-automator.git
+cd business-flow-automator
+copy .env.example .env        # Windows; на Linux/macOS: cp .env.example .env
+pip install -r requirements.txt
+.venv/Scripts/python -m uvicorn backend.app.main:app --port 8000   # или: uvicorn backend.app.main:app --port 8000
+```
+
+Открыть http://127.0.0.1:8000 — демо-данные создаются автоматически при первом старте (SEED_DEMO=true).
+
+Демо-доступы (только для демо): **admin / admin123** — полный доступ, журнал действий, роли.
+Внешние сервисы (Telegram, Google Sheets) не подключены — всё работает в локальном режиме: заявки, остатки, роли, журнал, дашборд.
+
+## Скриншоты
+
+| Заявки | Дашборд | Журнал/роли |
+|---|---|---|
+| ![1](skrin/1.png) | ![2](skrin/2.png) | ![4](skrin/4.png) |
 
 ## Как это работает
 
