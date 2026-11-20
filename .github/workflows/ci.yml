@@ -38,3 +38,24 @@ jobs:
           npm ci
           npm run build
           npm test
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose
+        run: docker compose config --quiet
+      - name: Build image
+        run: docker build -f backend/Dockerfile -t business-flow-automator:ci .
+      - name: Run container and verify demo login
+        run: |
+          docker run -d --name bfa-ci -p 8000:8000 business-flow-automator:ci
+          for i in $(seq 1 40); do
+            curl -fsS http://127.0.0.1:8000/health && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8000/health
+          curl -fsS -X POST http://127.0.0.1:8000/api/auth/login \
+            -H 'content-type: application/json' \
+            -d '{"login":"admin","password":"admin123"}' | grep -q access_token
+          docker logs bfa-ci | tail -15
