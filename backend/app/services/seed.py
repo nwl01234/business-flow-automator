@@ -41,7 +41,7 @@ def seed(db: Session) -> None:
         products = [Product(sku=s, name=n, stock=st, price=p) for s, n, st, p in _PRODUCTS]
         db.add_all(products)
         db.flush()  # получить id для связки заказов
-        bot = db.query(User).filter_by(role="bot").first()
+        manager = db.query(User).filter_by(role="manager").first()
         for day in range(13, -1, -1):
             for _ in range(random.randint(2, 6)):
                 p = random.choice(products)
@@ -62,7 +62,8 @@ def seed(db: Session) -> None:
                     contact=random.choice(["+7 9xx xxx-xx-xx", "info@company.ru", "Telegram DM"]),
                     product_id=p.id, qty=qty, price=p.price, amount=p.price * qty,
                     status=status, source=random.choice(["web", "telegram"]),
-                    created_by_id=bot.id if status == "new" and random.random() < .5 else None,
+                    deducted=status in ("confirmed", "shipped"),
+                    created_by_id=manager.id if random.random() < .7 else None,
                     created_at=created, updated_at=created,
                 )
                 db.add(order)

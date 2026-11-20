@@ -1,24 +1,29 @@
 services:
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     env_file: .env
     volumes:
       - backend_data:/app/data
-      - ./google-credentials.json:/app/google-credentials.json:ro  # ключ Google Sheets (опционально)
     ports:
       - "8000:8000"
     restart: unless-stopped
 
+  # Telegram-бот поднимается отдельно: нужен BOT_TOKEN.
+  # docker compose --profile bot up -d
   bot:
+    profiles: ["bot"]
     build: ./bot
     env_file: .env
     environment:
-      - API_PUBLIC_URL=http://backend:8000   # внутри compose-сети бот знает имя backend
+      - API_PUBLIC_URL=http://backend:8000
     depends_on:
       - backend
     restart: unless-stopped
 
-  # Полный стек с PostgreSQL: docker compose --profile full up
+  # Опциональный PostgreSQL: docker compose --profile full up -d
+  # В .env задать DATABASE_URL=postgresql://bf:bf_pass@postgres:5432/business_flow
   postgres:
     image: postgres:16-alpine
     profiles: ["full"]

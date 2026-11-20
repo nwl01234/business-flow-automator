@@ -10,8 +10,6 @@ from .config import settings
 from .database import get_db
 from .models import User
 
-_ROLES = {"admin", "manager", "bot"}
-
 
 def hash_password(password: str) -> str:
     salt = os.urandom(16).hex()
@@ -38,7 +36,7 @@ def create_token(user: User) -> str:
 
 
 def get_current_user(
-    authorization: str = Header(...),
+    authorization: str = Header(default=""),
     db: Session = Depends(get_db),
 ) -> User:
     if not authorization.startswith("Bearer "):
@@ -46,14 +44,15 @@ def get_current_user(
     try:
         payload = jwt.decode(authorization[7:], settings.jwt_secret, algorithms=["HS256"])
     except jwt.PyJWTError:
-        raise HTTPException(401, "Токен невалиден или истёк")
+        raise HTTPException(401, "Недействительный или истёкший токен")
     user = db.get(User, int(payload["sub"]))
     if not user:
         raise HTTPException(401, "Пользователь не найден")
     return user
 
 
-def require(*roles):
+def require(*roles: str):
+    """Backend-only RBAC. Роль из JWT сверяется здесь, а не в UI."""
     def dep(user: User = Depends(get_current_user)) -> User:
         if roles and user.role not in roles:
             raise HTTPException(403, "Недостаточно прав")

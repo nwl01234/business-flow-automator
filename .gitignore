@@ -18,6 +18,7 @@ data/
 # ── node ─────────────────────────────────────────────
 node_modules/
 frontend/node_modules/
+frontend/dist/
 
 # ── IDE / ОС ─────────────────────────────────────────
 .idea/

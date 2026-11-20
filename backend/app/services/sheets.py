@@ -56,20 +56,3 @@ def push_stock(sku: str, new_stock: int) -> None:
     except Exception:
         pass  # Sheets не должен ронять заказ; зеркало в БД уже обновлено
 
-
-def deduct(db: Session, product: Product, qty: int, actor: str) -> int:
-    """Списывает qty единиц: Sheets (если настроен) + локальное зеркало. Возвращает новый остаток."""
-    product.stock = max(0, product.stock - qty)
-    product.updated_at = utcnow()
-    db.commit()
-    push_stock(product.sku, product.stock)
-    return product.stock
-
-
-def restock(db: Session, product: Product, qty: int) -> int:
-    """Возвращает товар на остаток (при отмене списанного заказа)."""
-    product.stock += qty
-    product.updated_at = utcnow()
-    db.commit()
-    push_stock(product.sku, product.stock)
-    return product.stock

@@ -38,8 +38,9 @@ def login(body: schemas.LoginIn, request: Request, db: Session = Depends(get_db)
     user = db.query(models.User).filter_by(login=body.login).first()
     if not user or not verify_password(body.password, user.password_hash):
         _register_fail(ip)
-        audit.log_op(db, actor=ip, action="login_failed", entity="auth",
+        audit.record(db, actor=ip, action="login_failed", entity="auth",
                      entity_id=body.login, details="неверный логин или пароль")
+        db.commit()
         raise HTTPException(401, "Неверный логин или пароль")
     return schemas.TokenOut(access_token=create_token(user), user=schemas.UserOut.model_validate(user))
 

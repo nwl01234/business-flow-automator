@@ -1,174 +1,236 @@
 # Business Flow Automator
 
-**Автоматизация заявок и остатков для малого бизнеса: Telegram-приём заказов, журнал действий, real-time дашборд, роли.**
+Внутренняя система заявок и остатков для небольшой торговой компании: заявка
+приходит из веб-формы или Telegram, остаток списывается при подтверждении,
+каждое действие попадает в журнал, дашборд обновляется по WebSocket.
 
-[▶ Демо за 2 минуты](#демо-за-2-минуты) · [Скриншоты](#скриншоты) · [Запуск через Docker](#запуск-через-docker)
+**Стек:** Python 3.12 · FastAPI · SQLAlchemy 2.0 · SQLite / PostgreSQL · JWT ·
+React 18 + Vite + Tailwind 4 + Chart.js · aiogram 3 · WebSocket · Docker Compose · pytest.
 
-![Дашборд](skrin/1.png)
+## Problem → Solution → Result
 
-## Демо за 2 минуты
+**Problem.** Заказы теряются в переписках, остатки ведутся в Excel, а после
+«кто поменял статус?» приходится перечитывать чат. Типовой сценарий малого
+бизнеса: 1–5 менеджеров, один склад, заказы из двух каналов.
+
+**Solution.** Один backend как источник правды:
+
+- заявка создаётся из веб-формы или Telegram-бота через один REST API;
+- остаток проверяется при создании и **атомарно списывается** при подтверждении;
+- смена статуса ограничена конечным автоматом, отмена требует причину;
+- каждое действие пишется в append-only журнал `operations`;
+- дашборд получает события после commit, без ручного refresh.
+
+**Result.** Демо поднимается одной командой, сценарий «создать → подтвердить →
+отгрузить» проходит без внешних сервисов. Внешние интеграции (Google Sheets,
+SMTP, Telegram) опциональны и не ломают основной поток при отказе.
+
+## Architecture
+
+```
+HTTP / WebSocket
+      │
+      ▼
+routers/            auth · orders · inventory · analytics
+      │             валидация Pydantic, HTTP-коды, RBAC-dependency
+      ▼
+services/           orders · stock · audit
+      │             доменные правила и транзакции
+      ▼
+models.py           SQLAlchemy 2.0: users, products, orders, operations
+      │
+      ▼
+SQLite / PostgreSQL
+
+services/adapters/  sheets · excel · notify · scheduler
+                    вызываются после commit, fail-open
+```
+
+| Слой | Ответственность | Файлы |
+|---|---|---|
+| Router | HTTP, схемы, роли, коды ошибок | `backend/app/routers/` |
+| Service | бизнес-правила, транзакция, аудит | `backend/app/services/orders.py`, `stock.py`, `audit.py` |
+| Data | ORM-модели и сессия | `backend/app/models.py`, `database.py` |
+| Side effects | Sheets/Excel/Telegram/SMTP после commit | `backend/app/services/sheets.py`, `excel.py`, `notify.py` |
+| UI | React SPA + WebSocket, fallback на Alpine | `frontend/src/`, `frontend/alpine/` |
+
+Полный путь запроса:
+
+```
+Request → JWT auth → Pydantic validation → service → DB transaction
+        → commit → WebSocket event / Excel / Telegram / Sheets → clients
+```
+
+## AuthZ: роли и проверки на backend
+
+| Роль | Права |
+|---|---|
+| `admin` | всё: заявки, склад, аналитика, создание товаров |
+| `manager` | свои заявки + нераспределённые; смена статусов; чтение склада и аналитики |
+| `bot` | только создание заявки и чтение остатков; **не может** менять статусы |
+
+Проверки не дублируются в UI:
+
+- роль берётся из подписанного JWT и сверяется dependency `require(...)`
+  (`security.py`);
+- доступ к объекту проверяет `services/orders.get_order`: admin — любая заявка,
+  manager — своя или нераспределённая (`created_by_id IS NULL`), иначе `403`;
+- заявка бота создаётся без владельца — это входящий пул менеджеров, а не
+  собственность сервисного аккаунта;
+- создание/изменение товара — только `admin`.
+
+Демо упрощено осознанно: один склад и одна организация, поэтому tenant-скоупа
+нет. В проде добавился бы `company_id` в токен и в каждый запрос.
+
+## Consistency: списание остатка
+
+Подтверждение заявки — одна транзакция:
+
+```python
+# services/orders.change_status
+UPDATE orders SET deducted = true WHERE id = :id AND deducted = false
+UPDATE products SET stock = stock - :qty WHERE id = :pid AND stock >= :qty
+INSERT INTO operations (...)  -- status_confirmed + stock_write_off
+COMMIT
+```
+
+- `UPDATE ... WHERE stock >= qty` не даёт уйти в минус при параллельных запросах;
+- условный `deducted = false` не даёт списать дважды; повторный `confirmed`
+  возвращает `200` и ничего не меняет;
+- если остаток изменился между созданием и подтверждением — `409 insufficient_stock`
+  с актуальным количеством;
+- любая ошибка откатывает и статус, и остаток, и аудит: они в одной транзакции;
+- отмена подтверждённой заявки возвращает остаток ровно один раз (флаг `deducted`).
+
+Проверки в тестах: `tests/test_api.py::test_confirm_writes_off_once_and_writes_audit`,
+`test_cancel_restocks_once_and_requires_reason`, `test_stock_service_never_goes_negative`.
+
+## Audit log
+
+Таблица `operations` — append-only: `ts, actor, action, entity, entity_id, details, reason`.
+
+Пишутся: создание заявки, смена статуса, списание/возврат остатка, неудачный
+вход (`login_failed` + IP), действия планировщика. Запись создаётся в той же
+транзакции, что и бизнес-изменение, поэтому «статус сменился, а следа нет»
+невозможно. Читается через `GET /api/analytics/operations` и вкладку «Журнал».
+
+## Realtime
+
+`POST/PATCH` → commit → `hub.broadcast({"type": "orders_updated", ...})` →
+WebSocket-клиенты перезапрашивают данные. Событие отправляется **после** commit,
+чтобы клиент не увидел состояние, которого ещё нет в БД. Если WebSocket
+недоступен, фронтенд опрашивает API раз в 20 секунд. Токен проверяется при
+подключении к `/api/ws`.
+
+## API
+
+| Метод | Путь | Доступ | Назначение |
+|---|---|---|---|
+| POST | `/api/auth/login` | — | JWT на 8 часов, rate-limit 5 неудач/мин на IP |
+| GET | `/api/auth/me` | any | текущий пользователь |
+| GET | `/api/orders` | any | фильтры; manager видит свои + нераспределённые |
+| POST | `/api/orders` | admin/manager/bot | создание, `409` при нехватке остатка |
+| PATCH | `/api/orders/{id}/status` | admin/manager | переход, списание/возврат, аудит |
+| GET | `/api/inventory` | any | остатки |
+| POST | `/api/inventory` | admin | создание/обновление товара |
+| POST | `/api/inventory/sync` | admin | синхронизация с Google Sheets |
+| GET | `/api/analytics/metrics` | any | KPI, серии, топ товаров |
+| GET | `/api/analytics/operations` | any | журнал операций |
+| GET | `/api/analytics/export/excel` | any | Excel-зеркало Orders/Stock/Operations |
+| WS | `/api/ws?token=...` | any | события заявок |
+
+Swagger: `/docs`, healthcheck: `/health`.
+
+## Запуск
+
+### Docker (рекомендуется)
 
 ```bash
 git clone https://github.com/nwl01234/business-flow-automator.git
 cd business-flow-automator
-copy .env.example .env        # Windows; на Linux/macOS: cp .env.example .env
-pip install -r requirements.txt
-.venv/Scripts/python -m uvicorn backend.app.main:app --port 8000   # или: uvicorn backend.app.main:app --port 8000
+cp .env.example .env          # Windows: copy .env.example .env
+docker compose up --build
 ```
 
-Открыть http://127.0.0.1:8000 — демо-данные создаются автоматически при первом старте (SEED_DEMO=true).
+Открыть <http://localhost:8000>. Демо-данные и пользователи создаются при
+первом старте (`SEED_DEMO=true`).
 
-Демо-доступы (только для демо): **admin / admin123** — полный доступ, журнал действий, роли.
-Внешние сервисы (Telegram, Google Sheets) не подключены — всё работает в локальном режиме: заявки, остатки, роли, журнал, дашборд.
-
-## Скриншоты
-
-| Заявки | Дашборд | Журнал/роли |
+| Логин | Пароль | Роль |
 |---|---|---|
-| ![1](skrin/1.png) | ![2](skrin/2.png) | ![4](skrin/4.png) |
+| `admin` | `admin123` | полный доступ |
+| `manager` | `manager123` | свои заявки, смена статусов |
 
-## Как это работает
-
-```
-Telegram-бот ───┐                                  ┌── Google Sheets (внешние остатки)
-                ├──▶  FastAPI  ──▶  проверка/списание ┘
-Веб-форма  ─────┘        │
-                         ├──▶ PostgreSQL / SQLite (заявки, журнал операций)
-                         ├──▶ Telegram + Email уведомления
-                         ├──▶ APScheduler (дневной отчёт, алерты низких остатков)
-                         └──▶ WebSocket → дашборд updates в реальном времени
-```
-
-Поток заявки: создание (автопросмотр остатка, 409 если не хватает) → подтверждение (автосписание в Sheets и БД, запись в журнал) → отгрузка. Отмена — только с причиной, автоматический возврат остатка. Каждое действие пишется в `operations`: кто, что, когда, почему. Это тот самый вопрос, который обычно разруливается перечитыванием переписки — здесь он закрыт системно.
-
-Статусы можно менять только по допустимым переходам (`new → confirmed/cancelled`, `confirmed → shipped/cancelled`) — защита от «случайно нажал не туда».
-
-## Дашборд
-
-React SPA (Vite, Tailwind 4, Chart.js), авторизация по JWT, роли в бэкенде:
-
-- KPI: заявки за сегодня/неделю, выручка, конверсия, средний чек, низкие остатки
-- Графики: динамика заявок/выручки по дням, топ товаров
-- Фильтры: даты, статус
-- Таблица заявок со сменой статуса в два клика (причина обязательна при отмене)
-- Лента журнала операций и панель остатков с индикаторами
-- WebSocket: обновления приходят с сервера сами; при недоступности WS падает на поллинг 20 сек
-- Адаптив: сайдбар на ПК, таб-навигация на мобилке
-
-Роли: `admin` — всё; `manager` — дашборд и только свои заявки (проверяется на бэкенде, не в UI); `bot` — сервисный доступ для Telegram.
-
-**Рядом лежит `frontend/alpine/index.html`** — та же функциональность одной файлом на Alpine.js. Это осознанный fallback: дашборд работает даже там, где нет Node (старый VPS, срочные правки на проде). FastAPI раздаёт React-сборку, если она собрана, иначе fallback.
-
-## Быстрый старт
-
-Windows: двойной клик `start.bat` — сам создаст venv, поставит зависимости, поднимет сервер и откроет браузер.
+Опционально:
 
 ```bash
-# в ручном режиме
+docker compose --profile bot up -d    # Telegram-бот, нужен BOT_TOKEN в .env
+docker compose --profile full up -d   # PostgreSQL вместо SQLite
+```
+
+Dockerfile собирает React-дашборд в multi-stage сборке; `frontend/dist` в
+репозиторий не коммитится.
+
+### Локально без Docker
+
+```bash
 python -m venv .venv
 .venv/Scripts/pip install -r backend/requirements.txt   # Windows
 .venv/Scripts/python -m uvicorn backend.app.main:app --port 8000
 ```
 
-Демо-доступы (создаются при первом запуске вместе с демо-данными для графиков):
+Без собранного `frontend/dist` backend отдаёт `frontend/alpine/index.html` —
+тот же сценарий без Node. Для React-версии: `cd frontend && npm ci && npm run build`.
 
-| Логин | Пароль | Роль |
-|---|---|---|
-| `admin` | `admin123` | полный доступ |
-| `manager` | `manager123` | только свои заявки |
+Windows-альтернатива: `start.bat` создаёт venv, ставит зависимости и открывает браузер.
 
-Frontend собирается из `frontend/` (`npm install && npm run build` → `frontend/dist`). Коммитнутая сборка лежит в репозитории, поэтому backend работает из коробки без Node.
-
-Swagger: `/docs`. Healthcheck: `/health`.
-
-## Telegram-бот
-
-`start-bot.bat` поднимет backend (если не запущен) и запустит бота. Нужен `BOT_TOKEN` в `.env` (у @BotFather). Диалог: выбор товара из списка с остатками → количество → имя → контакт → подтверждение. Заявка уходит через тот же REST API, что и веб-форма — отдельная бизнес-логика не дублируется. Уведомления о заявках шлятся в `NOTIFY_CHAT_ID`.
-
-## Остатки: Google Sheets или локально
-
-`GOOGLE_CREDENTIALS_FILE` + `GOOGLE_SHEET_ID` в `.env` — и Sheets становится источником правды: при старте и по `POST /api/inventory/sync` остатки стягиваются в локальное зеркало, каждое списание обновляет колонку C в Sheets.
-
-Формат листа: `SKU | Name | Stock | Price`.
-
-### Подключение Google Sheets за 5 шагов
-
-1. [console.cloud.google.com](https://console.cloud.google.com) → создать проект (бесплатно).
-2. APIs & Services → Library → включить **Google Sheets API**.
-3. APIs & Services → Credentials → Create credentials → **Service account** → создать JSON-ключ, файл положить в корень проекта как `google-credentials.json` (уже в `.gitignore`).
-4. Создать Google-таблицу с листом `Stock`, формат: `SKU | Name | Stock | Price`, и расшарить её на e-mail сервисного аккаунта (адрес в конце JSON, поле `client_email`) с правами Editor.
-5. В `.env`: `GOOGLE_CREDENTIALS_FILE=google-credentials.json`, `GOOGLE_SHEET_ID=<id из ссылки таблицы>`. Рестарт — синхронизация подхватится автоматически, статус видно на вкладке «Аналитика → Интеграции».
-
-Без ключей система работает на локальной таблице. Адаптер инвентаря решает ровно одну проблему — Sheets недоступен или не заведён, бизнес-операции не должны падать.
-
-## Excel-зеркало данных
-
-Между API и внешним миром есть третий слой выгрузок — живой Excel (`data/mirror.xlsx`):
-
-- три листа: **Orders** (1000 последних), **Stock**, **Operations** (500 последних записей журнала);
-- после каждой операции с заявкой зеркалирование выполняется фоновым таском — Excel никогда не блокирует бизнес-поток;
-- скачивается кнопкой **xlsx ↓** в тулбаре дашборда (`GET /api/export/excel`, Bearer-авторизация);
-- работает без каких-либо внешних ключей — демо-сценарий «сравнить данные» доступен сразу.
-
-## Расписание
-
-APScheduler внутри backend: ежедневный отчёт в `DAILY_REPORT_HOUR` (заявки, выручка, лидер дня в чат) и проверка остатков каждые `STOCK_CHECK_HOURS` (алерт позиций ≤ `LOW_STOCK_THRESHOLD`). Интервалы — переменные окружения.
-
-## API
-
-| Метод | Путь | Назначение |
-|---|---|---|
-| POST | `/api/auth/login` | JWT, роль внутри токена |
-| GET | `/api/orders` | список с фильтрами; менеджер видит только свои |
-| POST | `/api/orders` | создание заявки; проверка остатка, 409 при нехватке |
-| PATCH | `/api/orders/{id}/status` | смена статуса + списание/возврат + журнал + уведомления |
-| GET | `/api/analytics/metrics` | KPI, серии по дням, топ товаров, каналы, скорость обработки |
-| GET | `/api/analytics/operations` | журнал операций |
-| GET | `/api/analytics/export/excel` | живое Excel-зеркало (Orders/Stock/Operations) |
-| GET | `/api/analytics/integrations` | статус Sheets и Excel-зеркала |
-| GET/POST | `/api/inventory` · POST `/api/inventory/sync` | остатки / синхронизация со Sheets |
-| WS | `/api/ws` | события заказов для дашборда |
-
-## Запуск через Docker
+## Тесты и CI
 
 ```bash
-cp .env.example .env
-docker compose up -d --build            # backend + bot
-docker compose --profile full up -d     # + PostgreSQL
+pip install -r backend/requirements.txt pytest
+pytest -q tests
 ```
 
-Deploy: Railway/Render — сервис из `backend/`, второй из `bot/`, `API_PUBLIC_URL` на бот-сервисе указывает на backend. Переменные — из `.env.example`.
+11 тестов: отсутствие/битый токен, RBAC на складе, валидация заявки,
+`409` при нехватке, однократное списание, идемпотентный повтор, возврат при
+отмене, обязательная причина отмены, недопустимый переход, object-level доступ
+менеджера, нераспределённые заявки бота, атомарность склада.
 
-## Продуманные компромиссы
+CI (`.github/workflows/ci.yml`): `pytest` + сборка фронтенда на каждый push/PR.
+Это проверка именно тестов и сборки, а не «зелёный workflow» без содержания.
 
-- **SQLite по умолчанию** — внутреннему инструменту на 1–5 менеджеров этого достаточно; `DATABASE_URL` меняется на Postgres без правок кода. Alembic миграций нет, `create_all` — честно указано; для прод-развития — первый пункт.
-- **Аудит — append-only таблица**, не event sourcing. Для уровня задачи — правильно: историчность важнее переусложнения. Неудачные входы пишутся в тот же журнал (`login_failed` + IP).
-- **Пароли — PBKDF2-SHA256 (100k итераций)** без внешних зависимостей (passlib-хелл не оправдан). Перейти на argon2 — при желании.
-- **Токен в localStorage, не в httpOnly cookie** — осознанный trade-off: нет CSRF-поверхности, но токен читаем JS при XSS. Прод-эволюция — refresh-token rotation, см. Roadmap. JWT живёт 8 часов; брутфорс входа режется rate-лимитом 5 неудач/мин на IP (429).
-- **Внешние сервисы не ломают поток заявки**: Gmail/Sheets/SMTP/Telegram/Excel падение → warning в лог, операция выглядит успешно. Это принципиальное решение — смотри `services/notify.py`, `services/sheets.py`, `services/excel.py`.
-- **Бот ходит в REST API backend'а**, а не импортирует Python-код — можно уносить бот в отдельный контейнер/сервер без изменений.
-- **Fallback-дашборд на Alpine.js** для bare-metal деплоев без Node.
+## Design decisions
 
-## Структура
+- **SQLite по умолчанию, PostgreSQL по `DATABASE_URL`.** Для 1–5 менеджеров
+  SQLite достаточно, а демо не требует инфраструктуры. Ограничение честное:
+  Alembic-миграций нет, схема создаётся `create_all`; для прод-развития это
+  первый пункт roadmap.
+- **Остаток списывается при подтверждении, а не при создании.** Заявка — это
+  ещё не продажа; резервирование усложнило бы модель (TTL, снятие резерва).
+  Между созданием и подтверждением возможен oversell — его режет атомарный
+  `UPDATE ... WHERE stock >= qty` на подтверждении.
+- **Аудит — таблица, не event sourcing.** Достаточно для вопроса «кто и когда»,
+  без инфраструктуры брокера и проекций.
+- **Побочные эффекты после commit и fail-open.** Упавший Telegram/Sheets/SMTP
+  пишет warning, но не отменяет заявку. Иначе внешний сервис становится
+  точкой отказа основного бизнес-процесса.
+- **JWT в localStorage.** Нет CSRF-поверхности, но токен доступен при XSS.
+  Прод-эволюция — httpOnly refresh-cookie с rotation. Сейчас TTL 8 часов.
+- **Бот ходит в REST API, а не импортирует код.** Его можно вынести в отдельный
+  контейнер/сервер без изменения бизнес-логики.
+- **Alpine-fallback.** Для VPS без Node остаётся рабочий дашборд; React-сборка —
+  основной вариант.
 
-```
-backend/app/        main · config · database · models · schemas · security · ws
-backend/app/routers/   auth · orders · inventory · analytics
-backend/app/services/  sheets · excel · notify · audit · scheduler · seed
-frontend/           React (Vite + Tailwind 4 + Chart.js), fallback: alpine/
-bot/                aiogram 3, FSM-диалог заказа через REST
-docker-compose.yml  backend + bot (+ Postgres по профилю full)
-start.bat / stop.bat / start-bot.bat   локальный запуск на Windows одним кликом
-```
+## Что дальше
 
-## Roadmap
-
-Alembic · argon2id · httpOnly refresh-token rotation · Telegram webhook вместо polling · SSE/дробленный WS-канал по вкладкам · 2FA.
+Alembic · argon2id · refresh-token rotation · tenant/`company_id` · резервирование
+остатка с TTL · pagination в списке заявок · structured logging + request-id.
 
 ## Скриншоты
 
-| | |
+| Дашборд | Заявки |
 |---|---|
-| ![Архитектура](.assets/screens/01.png) | ![Дашборд](.assets/screens/02.png) |
-| ![Заказы](.assets/screens/03.png) | ![Склад](.assets/screens/04.png) |
-| ![Аудит](.assets/screens/05.png) | |
+| ![Дашборд](.assets/screens/02.png) | ![Заявки](.assets/screens/03.png) |
+
+| Склад | Журнал |
+|---|---|
+| ![Склад](.assets/screens/04.png) | ![Журнал](.assets/screens/05.png) |
