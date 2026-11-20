@@ -4,8 +4,21 @@
 приходит из веб-формы или Telegram, остаток списывается при подтверждении,
 каждое действие попадает в журнал, дашборд обновляется по WebSocket.
 
-**Стек:** Python 3.12 · FastAPI · SQLAlchemy 2.0 · SQLite / PostgreSQL · JWT ·
-React 18 + Vite + Tailwind 4 + Chart.js · aiogram 3 · WebSocket · Docker Compose · pytest.
+**Стек:** TypeScript/React 18 · Vite · Tailwind 4 · Chart.js · FastAPI · SQLAlchemy 2.0 ·
+PostgreSQL / SQLite · JWT · WebSocket · aiogram 3 · Docker Compose · pytest ·
+Node 24 + Hono + Zod (`node-service/`).
+
+## Node/TS mirror
+
+Сразу рядом — [`node-service/`](node-service/): тот же доменный поток на TypeScript + Hono.
+Login, orders, confirm, cancel, audit; JWT/RBAC, Zod, идемпотентный confirm, 3 теста.
+
+```bash
+cd node-service && npm install && npm test && npm start   # :3100
+```
+
+Это не второй backend, а доказательство переноса правил: Python-версия — prod-like контур,
+Node-версия — компактный TS-срез под тот же API-контракт.
 
 ## Problem → Solution → Result
 
@@ -226,20 +239,6 @@ Node-среза на каждый push/PR.
 
 Alembic · argon2id · refresh-token rotation · tenant/`company_id` · резервирование
 остатка с TTL · pagination в списке заявок · structured logging + request-id.
-
-## Node/TS mirror of core flow
-
-Рядом лежит `node-service/` — компактный срез того же домена на Node 24 + TypeScript +
-Hono: JWT/RBAC, Zod-валидация, confirm со списанием остатка, идемпотентность и аудит.
-Это доказательство переноса подхода, а не второй продакшн-backend.
-
-```bash
-cd node-service && npm install
-npm test        # 3 сценария: confirm/idempotency, RBAC, validation/409
-npm start       # http://127.0.0.1:3100
-```
-
-Подробности и API — в [`node-service/README.md`](node-service/README.md).
 
 ## Скриншоты
 

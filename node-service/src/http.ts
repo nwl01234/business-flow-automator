@@ -53,6 +53,15 @@ export function createApp(store = new Store()) {
 
   app.get("/health", (c) => c.json({ status: "ok", service: "node-service" }));
 
+  app.get("/", (c) =>
+    c.json({
+      service: "node-service",
+      auth: "POST /auth/login {login,password} -> access_token",
+      demo: { admin: "admin123", manager: "manager123" },
+      endpoints: ["/inventory", "/orders", "/orders/:id/confirm", "/orders/:id/cancel", "/audit"],
+    }),
+  );
+
   app.post("/auth/login", async (c) => {
     const body = loginSchema.parse(await c.req.json());
     const user = store.findUser(body.login);

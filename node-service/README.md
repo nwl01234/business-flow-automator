@@ -34,7 +34,7 @@ JWT-секрет: `JWT_SECRET` (по умолчанию dev-значение), T
 | POST | `/orders/:id/cancel` | admin/manager | вернуть остаток, причина обязательна |
 | GET | `/audit` | admin | журнал операций |
 
-Пример:
+Пример (curl):
 
 ```bash
 TOKEN=$(curl -s localhost:3100/auth/login -H 'content-type: application/json' \
@@ -45,6 +45,16 @@ curl -s localhost:3100/orders -H "authorization: Bearer $TOKEN" \
   -d '{"productId":1,"qty":2,"customerName":"Иван"}'
 curl -s -X POST localhost:3100/orders/1/confirm -H "authorization: Bearer $TOKEN"
 curl -s -X POST localhost:3100/orders/1/confirm -H "authorization: Bearer $TOKEN"  # idempotent: true
+```
+
+Windows/PowerShell:
+
+```powershell
+$login = Invoke-RestMethod -Method Post http://127.0.0.1:3100/auth/login `
+  -ContentType 'application/json' -Body '{"login":"admin","password":"admin123"}'
+$h = @{ Authorization = "Bearer $($login.access_token)" }
+Invoke-RestMethod http://127.0.0.1:3100/orders -Headers $h
+Invoke-RestMethod -Method Post http://127.0.0.1:3100/orders/1/confirm -Headers $h
 ```
 
 ## Слои

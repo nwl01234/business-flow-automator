@@ -3,14 +3,14 @@ import { Chart, registerables } from 'chart.js';
 
 Chart.register(...registerables);
 
-const INK2 = '#86868b';
-const GRID = 'rgba(0,0,0,.055)';
+const INK2 = '#8a8f9c';
+const GRID = 'rgba(128,128,128,.18)';
 
 const baseOpts = extra => ({
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
-    legend: { labels: { color: '#1d1d1f', usePointStyle: true, pointStyle: 'circle', boxWidth: 7, boxHeight: 7, padding: 14 } },
+    legend: { labels: { color: '#8a8f9c', usePointStyle: true, pointStyle: 'circle', boxWidth: 7, boxHeight: 7, padding: 14 } },
     tooltip: {
       backgroundColor: '#1d1d1f', titleColor: '#fff', bodyColor: '#e8e8ed',
       cornerRadius: 10, padding: 10, displayColors: true, usePointStyle: true,
@@ -77,7 +77,7 @@ export function DonutChart({ data }) {
       options: {
         responsive: true, maintainAspectRatio: false, cutout: '68%',
         plugins: {
-          legend: { position: 'bottom', labels: { color: '#1d1d1f', usePointStyle: true, pointStyle: 'circle', boxWidth: 7, boxHeight: 7, padding: 10 } },
+          legend: { position: 'bottom', labels: { color: '#8a8f9c', usePointStyle: true, pointStyle: 'circle', boxWidth: 7, boxHeight: 7, padding: 10 } },
           tooltip: baseOpts({}).tooltip,
         },
       },
