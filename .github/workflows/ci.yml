@@ -25,3 +25,16 @@ jobs:
       - name: Build dashboard
         working-directory: frontend
         run: npm ci && npm run build
+
+  node-service:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: "24", cache: npm, cache-dependency-path: node-service/package-lock.json}
+      - name: Typecheck + tests (Hono, JWT/RBAC, idempotent confirm)
+        working-directory: node-service
+        run: |
+          npm ci
+          npm run build
+          npm test

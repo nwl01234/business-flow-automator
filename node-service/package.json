@@ -1,0 +1,25 @@
+{
+  "name": "bfa-node-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Node/TypeScript mirror of the business-flow order confirmation flow",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "node --watch src/index.ts",
+    "start": "node src/index.ts",
+    "build": "tsc --noEmit",
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "hono": "^4.13.19",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  }
+}

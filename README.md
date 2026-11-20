@@ -190,13 +190,15 @@ pip install -r backend/requirements.txt pytest
 pytest -q tests
 ```
 
-11 тестов: отсутствие/битый токен, RBAC на складе, валидация заявки,
+12 тестов: отсутствие/битый токен, RBAC на складе, валидация заявки,
 `409` при нехватке, однократное списание, идемпотентный повтор, возврат при
 отмене, обязательная причина отмены, недопустимый переход, object-level доступ
-менеджера, нераспределённые заявки бота, атомарность склада.
+менеджера, нераспределённые заявки бота, атомарность склада и идемпотентный seed.
 
-CI (`.github/workflows/ci.yml`): `pytest` + сборка фронтенда на каждый push/PR.
-Это проверка именно тестов и сборки, а не «зелёный workflow» без содержания.
+Плюс `node-service`: 3 теста на confirm/идемпотентность, RBAC и 400/409.
+
+CI (`.github/workflows/ci.yml`): pytest + сборка React + typecheck и тесты
+Node-среза на каждый push/PR.
 
 ## Design decisions
 
@@ -224,6 +226,20 @@ CI (`.github/workflows/ci.yml`): `pytest` + сборка фронтенда на
 
 Alembic · argon2id · refresh-token rotation · tenant/`company_id` · резервирование
 остатка с TTL · pagination в списке заявок · structured logging + request-id.
+
+## Node/TS mirror of core flow
+
+Рядом лежит `node-service/` — компактный срез того же домена на Node 24 + TypeScript +
+Hono: JWT/RBAC, Zod-валидация, confirm со списанием остатка, идемпотентность и аудит.
+Это доказательство переноса подхода, а не второй продакшн-backend.
+
+```bash
+cd node-service && npm install
+npm test        # 3 сценария: confirm/idempotency, RBAC, validation/409
+npm start       # http://127.0.0.1:3100
+```
+
+Подробности и API — в [`node-service/README.md`](node-service/README.md).
 
 ## Скриншоты
 

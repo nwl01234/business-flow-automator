@@ -149,3 +149,19 @@ def test_stock_service_never_goes_negative(client, admin_token, product):
         db.rollback()
     finally:
         db.close()
+
+
+def test_seed_is_idempotent(client):
+    from backend.app.database import SessionLocal
+    from backend.app.models import Order, Product, User
+    from backend.app.services.seed import seed
+
+    db = SessionLocal()
+    try:
+        counts = lambda: (db.query(User).count(), db.query(Product).count(), db.query(Order).count())
+        before = counts()
+        seed(db)
+        seed(db)
+        assert counts() == before
+    finally:
+        db.close()
