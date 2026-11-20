@@ -161,12 +161,12 @@ Swagger: `/docs`, healthcheck: `/health`.
 ```bash
 git clone https://github.com/nwl01234/business-flow-automator.git
 cd business-flow-automator
-cp .env.example .env          # Windows: copy .env.example .env
 docker compose up --build
 ```
 
 Открыть <http://localhost:8000>. Демо-данные и пользователи создаются при
-первом старте (`SEED_DEMO=true`).
+первом старте (`SEED_DEMO=true`). `.env` не обязателен: без него работают
+демо-дефолты; для своих настроек — `cp .env.example .env`.
 
 | Логин | Пароль | Роль |
 |---|---|---|

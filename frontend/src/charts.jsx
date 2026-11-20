@@ -6,6 +6,12 @@ Chart.register(...registerables);
 const INK2 = '#8a8f9c';
 const GRID = 'rgba(128,128,128,.18)';
 
+function cssColor(value) {
+  if (!value.startsWith('var(')) return value;
+  const name = value.slice(4, -1).trim();
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#0071e3';
+}
+
 const baseOpts = extra => ({
   responsive: true,
   maintainAspectRatio: false,
@@ -70,7 +76,7 @@ export function DonutChart({ data }) {
         labels: data.map(d => d.label),
         datasets: [{
           data: data.map(d => d.value),
-          backgroundColor: data.map(d => d.color),
+          backgroundColor: data.map(d => cssColor(d.color)),
           borderWidth: 0, hoverOffset: 6, spacing: 2,
         }],
       },
