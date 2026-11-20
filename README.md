@@ -163,7 +163,7 @@ docker compose up --build
 Опционально:
 
 ```bash
-docker compose --profile bot up -d    # Telegram-бот, нужен BOT_TOKEN в .env
+docker compose --profile bot up -d    # Telegram-бот, нужен TELEGRAM_BOT_TOKEN в .env
 docker compose --profile full up -d   # PostgreSQL вместо SQLite
 ```
 
